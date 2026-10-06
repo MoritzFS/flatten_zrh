@@ -63,6 +63,12 @@ PROFILES_NPZ = PROCESSED_DIR / "edge_profiles.npz"
 #: (configured in ``config.ElevationConfig.dem_sigma_m``).
 DEM_SMOOTH_SIGMA_M = ELEVATION.dem_sigma_m
 
+#: Where a street passes under a bridge (``network._under_structures``), the
+#: DEM samples within this distance (m) of the crossing are discarded and the
+#: profile is interpolated across the gap: the bare-earth model fills the
+#: space under a deck from the embankments either side, not from the street.
+UNDER_BRIDGE_HALF_WIDTH_M = 15.0
+
 
 # --------------------------------------------------------------------------
 # DEM mosaic
@@ -362,6 +368,22 @@ def sample_edge_profiles(edges, sampler: DemSampler | None = None,
     cat_dist = np.concatenate(all_dist)
     with step(f"sampling DEM at {cat_x.size:,} points", log):
         cat_z = sampler.sample(cat_x, cat_y)
+
+    # streets under bridges: drop the samples the deck's removal corrupted;
+    # the gap filling below interpolates across them along the street
+    if "under_at_m" in edges.columns:
+        n_under = 0
+        for i, at in enumerate(edges["under_at_m"]):
+            if at is None or len(at) == 0:
+                continue
+            a, b = offsets[i], offsets[i + 1]
+            d = cat_dist[a:b]
+            near = np.zeros(d.size, dtype=bool)
+            for x in at:
+                near |= np.abs(d - x) <= UNDER_BRIDGE_HALF_WIDTH_M
+            cat_z[a:b][near] = np.nan
+            n_under += int(near.sum())
+        log.info("  %d samples under bridges set aside for interpolation", n_under)
 
     edge_ids = np.asarray(edges["edge_id"].values)
     is_struct = np.asarray(edges["is_structure"].values)

@@ -56,11 +56,12 @@ MIRROR_DIR = RAW_DIR / "mirror"
 #: on the server -- the nested route/destination columns are large.
 SEGMENT_COLUMNS = [
     "id", "names", "subtype", "class", "subclass", "connectors",
-    "road_flags", "access_restrictions", "road_surface", "speed_limits",
-    "level_rules", "geometry", "bbox", "sources",
+    "road_flags", "rail_flags", "access_restrictions", "road_surface",
+    "speed_limits", "level_rules", "geometry", "bbox", "sources",
 ]
 CONNECTOR_COLUMNS = ["id", "geometry", "bbox"]
-PLACE_COLUMNS = ["id", "names", "categories", "confidence", "geometry", "bbox"]
+PLACE_COLUMNS = ["id", "names", "taxonomy", "basic_category", "confidence",
+                 "operating_status", "sources", "geometry", "bbox"]
 BASE_COLUMNS = ["id", "names", "subtype", "class", "geometry", "bbox"]
 
 

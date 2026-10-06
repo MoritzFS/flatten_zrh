@@ -264,6 +264,7 @@ def build_edges(segments_path: Path, force: bool = False,
 
     df = load_segments(segments_path)
     sidewalks = _sidewalk_geometries(df)
+    overhead = _bridge_geometries(df)
     with step("filtering segments", log):
         df = _base_filter(df)
     with step("splitting segments at connectors", log):
@@ -288,9 +289,15 @@ def build_edges(segments_path: Path, force: bool = False,
     # structure flags
     gdf["is_bridge"] = gdf["flags"].apply(lambda f: "is_bridge" in f)
     gdf["is_tunnel"] = gdf["flags"].apply(lambda f: "is_tunnel" in f)
-    gdf["is_structure"] = gdf["is_bridge"] | gdf["is_tunnel"]
+    # A covered street (under a building, an arcade, a station roof) is a
+    # structure for the elevation model too: the bare-earth DEM fills the
+    # footprint of whatever stands over it. Bullingerstrasse passes under a
+    # building and read 54% where it does.
+    gdf["is_covered"] = gdf["flags"].apply(lambda f: "is_covered" in f)
+    gdf["is_structure"] = gdf["is_bridge"] | gdf["is_tunnel"] | gdf["is_covered"]
 
     walk_sidepath = _beside_sidewalk(gdf, sidewalks)
+    gdf["under_at_m"] = _under_structures(gdf, overhead)
 
     # per-mode access
     with step("evaluating per-mode access restrictions", log):
@@ -332,14 +339,70 @@ def build_edges(segments_path: Path, force: bool = False,
 
     gdf["edge_id"] = np.arange(len(gdf), dtype=np.int64)
     keep = ["edge_id", "segment_id", "u", "v", "part", "cls", "subclass", "name",
-            "length_m", "is_bridge", "is_tunnel", "is_structure",
-            "walk_ok", "walk_oneway", "walk_restricted", "walk_sidepath",
+            "length_m", "is_bridge", "is_tunnel", "is_covered", "is_structure",
+            "walk_ok", "walk_oneway", "walk_restricted", "walk_sidepath", "under_at_m",
             "bike_ok", "bike_oneway", "bike_restricted",
             "bike_facility", "low_stress", "geometry"]
     gdf = gdf[keep]
     gdf.to_parquet(EDGES_PARQUET)
     log.info("wrote %s (%d edges)", EDGES_PARQUET.name, len(gdf))
     return gdf
+
+
+# --------------------------------------------------------------------------
+# streets passing under bridges
+# --------------------------------------------------------------------------
+def _bridge_geometries(df: pd.DataFrame):
+    """Projected geometries of every road or rail segment flagged as a bridge."""
+    import geopandas as gpd
+    import shapely
+
+    def is_bridge(row) -> bool:
+        return "is_bridge" in (_flags(row["road_flags"])
+                               | _flags(row.get("rail_flags")))
+    sub = df[df["subtype"].isin(["road", "rail"])]
+    keep = sub.apply(is_bridge, axis=1) if len(sub) else pd.Series(dtype=bool)
+    geoms = shapely.from_wkb(sub.loc[keep, "geometry"].values) if keep.any() else []
+    log.info("  %d road and rail bridge segments", int(keep.sum()) if len(sub) else 0)
+    return gpd.GeoSeries(geoms, crs=CRS_GEOGRAPHIC).to_crs(CRS_PROJECTED)
+
+
+def _under_structures(gdf, bridges) -> list:
+    """Where each street edge passes under a bridge, in metres along it.
+
+    swissALTI3D is a bare-earth model: a bridge deck is removed and the
+    ground beneath it interpolated from what surrounds it.  Where a street
+    runs under a railway on an embankment, "what surrounds it" is mostly
+    embankment, so the street acquires a phantom hump several metres high --
+    Birchstrasse in Seebach climbed 22% to pass under the railway.  Upstream
+    corrects edges that *are* bridges or tunnels; this records the edges that
+    run *beneath* one, so that elevation sampling can bridge the gap instead
+    (see ``elevation.UNDER_BRIDGE_HALF_WIDTH_M``).  A street that merely
+    joins a bridge at its end is not under it.
+    """
+    import shapely
+
+    out = [np.zeros(0)] * len(gdf)
+    if bridges is None or len(bridges) == 0:
+        return out
+    with step("finding streets that pass under bridges", log):
+        geoms = gdf.geometry.to_numpy()
+        tree = shapely.STRtree(bridges.to_numpy())
+        pairs = tree.query(geoms, predicate="intersects")
+        hits: dict[int, list[float]] = {}
+        for i, j in zip(*pairs):
+            if gdf["is_structure"].iat[i]:
+                continue
+            g = geoms[i]
+            x = shapely.intersection(g, bridges.iat[j])
+            for pt in shapely.get_parts(shapely.points(shapely.get_coordinates(x))):
+                d = g.project(pt)
+                if 2.0 < d < g.length - 2.0:
+                    hits.setdefault(i, []).append(float(d))
+        for i, ds in hits.items():
+            out[i] = np.unique(np.round(ds, 1))
+    log.info("  %d street edges pass under a bridge", len(hits))
+    return out
 
 
 # --------------------------------------------------------------------------

@@ -60,10 +60,16 @@ GRID = [
     ("point_rank_2", {"point_rank": 2}, "third-nearest access intersection"),
 ]
 
-_STEEP = ["Filbert Street", "Jones Street", "22nd Street", "Bradford Street"]
-_FLAT = ["The Embarcadero", "Valencia Street", "Market Street"]
+#: Steep streets with an OpenStreetMap incline tag (the steepest tagged way
+#: of each, in brackets): the Altstadt lanes Stüssihofstatt (17%),
+#: Trittligasse and Kirchgasse (13%), and Kantonsschulstrasse (8%).
+_STEEP = ["Stüssihofstatt", "Trittligasse", "Kirchgasse", "Kantonsschulstrasse"]
+_STEEP_TAGGED = {"Stüssihofstatt": 17, "Trittligasse": 13, "Kirchgasse": 13,
+                 "Kantonsschulstrasse": 8}
+_FLAT = ["Limmatquai", "Bahnhofstrasse", "Mythenquai"]
+#: The Altstadt lanes are pedestrian streets, so pedestrian counts here.
 _DRIVABLE = ("residential", "tertiary", "secondary", "primary", "unclassified",
-             "living_street")
+             "living_street", "pedestrian")
 
 
 # --------------------------------------------------------------------------
@@ -98,9 +104,9 @@ def summarize_current_run(tag: str) -> Path:
     for pname, g in walk.groupby("profile"):
         out[f"{pname}_detour_pct"] = float(100 * (g["detour_ratio"].mean() - 1))
         out[f"{pname}_gain_saved_pct"] = float(g["gain_saved_pct"].mean())
-        out[f"{pname}_gain_ft"] = float(g["elev_gain_m"].mean() * 3.28084)
+        out[f"{pname}_gain_m"] = float(g["elev_gain_m"].mean())
         out[f"{pname}_max_grade_pct"] = float(100 * g["max_grade"].mean())
-        out[f"{pname}_dist_mi"] = float(g["distance_m"].mean() / 1609.344)
+        out[f"{pname}_dist_km"] = float(g["distance_m"].mean() / 1000.0)
 
     km = edges[edges["walk_ok"]]["length_m"].sum() / 1000
     out["network_gain_per_km"] = float(
@@ -122,18 +128,19 @@ def summarize_current_run(tag: str) -> Path:
 
     if len(passes):
         p0 = passes.iloc[0]
-        out["top_pass_ft"] = float(p0["pass_elev_ft"])
+        out["top_pass_m"] = float(p0["pass_elev_m"])
         out["top_pass_pairs"] = int(p0["pairs_served"])
         out["top_pass_nbhd"] = str(p0["neighborhood"])
     out["n_passes"] = int(len(passes))
 
     val = run_validation(ctx, cor, write=False)
-    wig = val["flat"][val["flat"]["corridor"].str.contains("Wiggle")]
-    if len(wig):
-        w = wig.iloc[0]
-        out["wiggle_excess_flat_m"] = float(w["excess_gain_m"])
-        out["wiggle_excess_shortest_m"] = float(w["shortest_excess_gain_m"])
-        out["wiggle_discovered"] = bool(w["discovered"])
+    sad = val.get("saddle") or {}
+    if sad:
+        out["saddle_pass_m"] = float(sad["pass"]["elev_m"])
+        out["saddle_pass_street"] = str(sad["pass"]["street"])
+        out["saddle_on_saddle"] = bool(sad["pass"]["on_saddle"])
+        r = sad["routes"].get(("bike", "min_climb"), {})
+        out["saddle_bike_flat_high_m"] = float(r.get("high_point_m", np.nan))
     dem = val["dem"]
     if len(dem):
         out["dem_rms_m"] = float(np.sqrt((dem["diff"] ** 2).mean()))
@@ -157,8 +164,9 @@ def _run(tag: str, overrides: dict, force: bool = False) -> dict:
     (run_dir / "processed").mkdir(parents=True, exist_ok=True)
     (run_dir / "outputs").mkdir(parents=True, exist_ok=True)
     # the mosaic is parameter-independent and 20 s to rebuild: share it
-    base_mosaic = DATA_DIR / "processed" / "dem_sf_1m.tif"
-    link = run_dir / "processed" / "dem_sf_1m.tif"
+    from .elevation import DEM_MOSAIC
+    base_mosaic = DATA_DIR / "processed" / DEM_MOSAIC.name
+    link = run_dir / "processed" / DEM_MOSAIC.name
     if base_mosaic.exists() and not link.exists():
         link.symlink_to(base_mosaic)
 
@@ -234,7 +242,7 @@ def _edge_overlap(a: dict | None, b: dict | None) -> float:
 
 
 def _lead_streets(names: list) -> set:
-    """The leading street of each corridor name, e.g. 'Valencia Street'."""
+    """The leading street of each corridor name, e.g. 'Limmatquai'."""
     return {n.split(" - ")[0] for n in names if n}
 
 
@@ -258,11 +266,12 @@ def _write(df: pd.DataFrame) -> None:
 
     L = ["# Sensitivity analysis", "",
          "Every configuration below rebuilds the full pipeline -- elevation "
-         "sampling, metrics, 10,080 routes, corridors and passes -- with one "
+         "sampling, metrics, 8,976 routes, corridors and passes -- with one "
          "parameter changed from the baseline. The question is whether the "
-         "findings survive the modelling choices.", "",
+         "findings survive the modelling choices. (The harness is upstream's, "
+         "from flattensf; the reference streets are Zurich's.)", "",
          "Baseline: " + ", ".join(f"{k} = {v:g}" for k, v in BASELINE.items()), "",
-         "## The headline (walking, all 1,260 ordered pairs)", "",
+         "## The headline (walking, all 1,122 ordered pairs)", "",
          "| Configuration | Change | Flattest: extra distance | Flattest: "
          "climbing avoided | Shortest: mean climb | Flattest: mean climb | "
          "Grade-averse: mean steepest |",
@@ -271,25 +280,25 @@ def _write(df: pd.DataFrame) -> None:
         L.append(f"| {tag} | {why.get(tag, '')} | "
                  f"{r['min_climb_detour_pct']:+.0f}% | "
                  f"{r['min_climb_gain_saved_pct']:.0f}% | "
-                 f"{r['shortest_gain_ft']:.0f} ft | "
-                 f"{r['min_climb_gain_ft']:.0f} ft | "
+                 f"{r['shortest_gain_m']:.0f} m | "
+                 f"{r['min_climb_gain_m']:.0f} m | "
                  f"{r['grade_averse_max_grade_pct']:.1f}% |")
 
     L += ["", "## Elevation model checks", "",
-          "| Configuration | Filbert St | Jones St | 22nd St | Bradford St | "
-          "Embarcadero climb/km | Valencia climb/km | Network climb/km | "
-          "DEM RMS vs 1/3\" |", "|---|---|---|---|---|---|---|---|---|"]
+          "| Configuration | " + " | ".join(_STEEP) + " | "
+          + " | ".join(f"{n} climb/km" for n in _FLAT)
+          + " | Network climb/km | DEM RMS vs DHM25 |",
+          "|---" * (len(_STEEP) + len(_FLAT) + 3) + "|"]
     for tag, r in df.iterrows():
-        L.append(f"| {tag} | {r['grade_Filbert Street']:.1f}% | "
-                 f"{r['grade_Jones Street']:.1f}% | {r['grade_22nd Street']:.1f}% | "
-                 f"{r['grade_Bradford Street']:.1f}% | "
-                 f"{r['gainkm_The Embarcadero']:.1f} m | "
-                 f"{r['gainkm_Valencia Street']:.1f} m | "
+        L.append(f"| {tag} | "
+                 + " | ".join(f"{r[f'grade_{n}']:.1f}%" for n in _STEEP) + " | "
+                 + " | ".join(f"{r[f'gainkm_{n}']:.1f} m" for n in _FLAT) + " | "
                  f"{r['network_gain_per_km']:.1f} m | "
                  f"{r.get('dem_rms_m', float('nan')):.2f} m |")
-    L += ["", "Published: Filbert 31.5%, Jones 29%, 22nd 31.5%, Bradford 41%.", ""]
+    L += ["", "Steepest OpenStreetMap incline tag on each street: "
+          + ", ".join(f"{n} {v}%" for n, v in _STEEP_TAGGED.items()) + ".", ""]
 
-    L += ["## Corridors, passes and the Wiggle", "",
+    L += ["## Corridors, passes and the saddle", "",
           "Corridor overlap is measured on the street itself: the "
           "length-weighted share of corridor-material edges the run has in "
           "common with the baseline. Comparing corridor names would be "
@@ -297,7 +306,7 @@ def _write(df: pd.DataFrame) -> None:
           "corridor without changing where it runs.", "",
           "| Configuration | Corridors found | Corridor edges shared with "
           "baseline | Lead streets of the top 12 kept | Streets that enter the "
-          "top 12 | Top corridor | Top pass | Wiggle excess climb (flat / shortest) |",
+          "top 12 | Top corridor | Top pass | Lowest crossing to Oerlikon (published 472 m) |",
           "|---|---|---|---|---|---|---|---|"]
     for tag, r in df.iterrows():
         top = r["top_corridor"].split(" - ")[0]
@@ -306,10 +315,10 @@ def _write(df: pd.DataFrame) -> None:
                  f"{int(r['lead_streets_shared'])}/12 | "
                  f"{r['lead_streets_new'] or '&mdash;'} | "
                  f"{top} ({r['top_corridor_km']:.1f} km) | "
-                 f"{r.get('top_pass_nbhd','')} {r.get('top_pass_ft', float('nan')):.0f} ft, "
+                 f"{r.get('top_pass_nbhd','')} {r.get('top_pass_m', float('nan')):.0f} m, "
                  f"{int(r.get('top_pass_pairs', 0))} pairs | "
-                 f"{r.get('wiggle_excess_flat_m', float('nan')):.1f} m / "
-                 f"{r.get('wiggle_excess_shortest_m', float('nan')):.1f} m |")
+                 f"{r.get('saddle_pass_m', float('nan')):.1f} m, "
+                 f"{r.get('saddle_pass_street', '')} |")
 
     if base is not None and len(df) > 1:
         others = df.drop(index="baseline")
@@ -340,11 +349,11 @@ def _write(df: pd.DataFrame) -> None:
         L += [f"- The dominant pass is in {base.get('top_pass_nbhd','')} in "
               f"{int((df['top_pass_nbhd'] == base.get('top_pass_nbhd')).sum())} of "
               f"{len(df)} configurations.",
-              f"- The Wiggle is discovered as a corridor in "
-              f"{int(df['wiggle_discovered'].fillna(False).sum())} of {len(df)} "
-              f"configurations, and its flat route always wastes less climbing "
-              f"than the shortest one: worst case "
-              f"{df['wiggle_excess_flat_m'].max():.1f} m against "
-              f"{df['wiggle_excess_shortest_m'].min():.1f} m.", ""]
+              f"- The lowest crossing from Central to Oerlikon lands on the "
+              f"Bucheggplatz-Milchbuck saddle in "
+              f"{int(df['saddle_on_saddle'].fillna(False).astype(bool).sum())} of "
+              f"{len(df)} configurations, at "
+              f"{df['saddle_pass_m'].min():.1f}-{df['saddle_pass_m'].max():.1f} m "
+              f"against the published 472 m.", ""]
     SENS_MD.write_text("\n".join(L))
     log.info("wrote %s and %s", SENS_CSV.name, SENS_MD.name)

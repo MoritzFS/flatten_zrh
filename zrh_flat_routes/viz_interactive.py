@@ -25,8 +25,8 @@ from pathlib import Path
 
 import numpy as np
 
-from .config import (OUTPUT_DIR, PRODUCT_NAME, REPO_URL, SITE_DIR, SITE_URL,
-                     UPSTREAM_SITE, UPSTREAM_URL)
+from .config import (DEFAULT_TRIP, OUTPUT_DIR, PRODUCT_NAME, REPO_URL, SITE_DIR,
+                     SITE_URL, UPSTREAM_SITE, UPSTREAM_URL)
 from .utils import get_logger, human_bytes, step
 
 log = get_logger("zrh_flat_routes.viz_interactive")
@@ -232,7 +232,7 @@ def _route_page_html(payload: dict, linked: bool, assets: dict | None = None) ->
             '<meta property="og:image:width" content="1200">',
             '<meta property="og:image:height" content="630">',
             '<meta property="og:image:alt" content="A map of Zürich with a fan of '
-            'walking routes between Zürich HB and the Dolder">',
+            'walking routes between Altstetten and Oerlikon stations">',
             '<meta name="twitter:card" content="summary_large_image">',
             f'<meta name="twitter:title" content="{PRODUCT_NAME}">',
             '<meta name="twitter:description" content="The flattest walking or cycling '
@@ -261,8 +261,8 @@ _FAVICON = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
 #: Where the route page opens before anyone types. Each entry is (label,
 #: place names to try in order, fallback), where the fallback is a quarter's
 #: access point or a (lon, lat) pair for a spot the index does not carry.
-#: Set from ``DEFAULT_TRIP`` in config.py.
-from .config import DEFAULT_TRIP as _DEFAULT_TRIP  # noqa: E402
+#: Set by ``DEFAULT_TRIP`` in config.py.
+_DEFAULT_TRIP = DEFAULT_TRIP
 
 
 def _default_trip(places: dict | None, points: dict) -> list[dict]:
@@ -380,6 +380,8 @@ def _write_route_page(ctx, graph: dict, pts: dict) -> Path:
     for plain in ("app.css", "app.js", "leaflet.css", "leaflet.js"):
         (SITE_DIR / plain).unlink(missing_ok=True)
     (SITE_DIR / "favicon.svg").write_text(_FAVICON, encoding="utf-8")
+    # Leaflet's BSD-2-Clause notice travels with the copy the site serves
+    shutil.copyfile(VENDOR_DIR / "LICENSE-leaflet.txt", SITE_DIR / "LICENSE-leaflet.txt")
     (SITE_DIR / ".nojekyll").write_text("", encoding="utf-8")
     # a project site on moritzfs.github.io: no custom domain, so no CNAME
     (SITE_DIR / "CNAME").unlink(missing_ok=True)

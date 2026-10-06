@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "zrh-flat-routes"
 version = "1.0.0"
-description = "Discovering San Francisco's low-elevation street network: flat-route modelling, corridor detection and pass analysis"
+description = "Discovering Zurich's low-elevation street network: flat-route modelling, corridor detection and pass analysis (a port of flattensf)"
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.24",

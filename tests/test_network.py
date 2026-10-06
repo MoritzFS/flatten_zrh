@@ -140,15 +140,68 @@ from zrh_flat_routes.config import PROCESSED_DIR  # noqa: E402
 
 @pytest.mark.skipif(not (PROCESSED_DIR / "edges_metrics.parquet").exists(),
                     reason="processed network not built")
-def test_slow_streets_are_walkable_and_bikeable():
-    """Cabrillo, Page, Shotwell and 12th Avenue are SF Slow Streets: closed
-    to through traffic, open to everyone else. The access parser once read
-    their all-modes destination rule as closing them to walking."""
+def test_main_quays_are_walkable_and_bikeable():
+    """Limmatquai and the lake promenade must be open to walking, and the
+    Limmatquai to cycling too."""
     import pandas as pd
     e = pd.read_parquet(PROCESSED_DIR / "edges_metrics.parquet",
                         columns=["name", "cls", "walk_ok", "bike_ok", "length_m"])
-    for street in ("Cabrillo Street", "Page Street", "Shotwell Street"):
-        s = e[(e["name"] == street) & (e["cls"] == "residential")]
-        assert len(s) > 20, street
-        assert s["walk_ok"].mean() > 0.95, (street, s["walk_ok"].mean())
-        assert s["bike_ok"].mean() > 0.95, (street, s["bike_ok"].mean())
+    for street in ("Limmatquai", "Utoquai", "Mythenquai"):
+        s = e[e["name"] == street]
+        assert len(s) > 5, street
+        assert s["walk_ok"].mean() > 0.9, (street, s["walk_ok"].mean())
+    s = e[e["name"] == "Limmatquai"]
+    assert s["bike_ok"].mean() > 0.9
+
+
+# ------------------------------------------- Swiss defaults, on synthetic data
+def test_a_missing_rule_closes_a_footway_to_bicycles_only_by_default():
+    assert evaluate_access(None, "bicycle", default=False)["allowed"] is False
+    allow = [{"access_type": "allowed", "when": {"mode": ["bicycle"]}}]
+    assert evaluate_access(allow, "bicycle", default=False)["allowed"] is True
+    deny = [{"access_type": "denied", "when": {"mode": ["bicycle"]}}]
+    assert evaluate_access(deny, "bicycle", default=True)["allowed"] is False
+
+
+def _gdf(lines, **cols):
+    import geopandas as gpd
+    from shapely.geometry import LineString
+    data = {"geometry": [LineString(c) for c in lines]}
+    data.update(cols)
+    return gpd.GeoDataFrame(data, crs="EPSG:2056")
+
+
+def test_a_street_lined_by_a_sidewalk_counts_as_walkable():
+    import geopandas as gpd
+    from shapely.geometry import LineString
+    from zrh_flat_routes.network import _beside_sidewalk
+    streets = _gdf([[(0, 0), (100, 0)], [(0, 50), (100, 50)]],
+                   cls=["secondary", "secondary"], flags=[set(), set()])
+    sidewalks = gpd.GeoSeries([LineString([(0, 6), (100, 6)])], crs="EPSG:2056")
+    out = _beside_sidewalk(streets, sidewalks)
+    assert out.tolist() == [True, False]
+
+
+def test_a_tunnel_is_never_opened_by_a_sidewalk_above_it():
+    import geopandas as gpd
+    from shapely.geometry import LineString
+    from zrh_flat_routes.network import _beside_sidewalk
+    streets = _gdf([[(0, 0), (100, 0)]], cls=["secondary"], flags=[{"is_tunnel"}])
+    sidewalks = gpd.GeoSeries([LineString([(0, 6), (100, 6)])], crs="EPSG:2056")
+    assert _beside_sidewalk(streets, sidewalks).tolist() == [False]
+
+
+def test_crossings_under_a_bridge_are_located_along_the_street():
+    import geopandas as gpd
+    from shapely.geometry import LineString
+    from zrh_flat_routes.network import _under_structures
+    streets = _gdf([[(0, 0), (100, 0)], [(0, 40), (100, 40)], [(0, 80), (30, 80)]],
+                   is_structure=[False, True, False])
+    # one bridge crosses both long streets at x = 30; the short one only
+    # touches a bridge at its end, which is joining it, not passing under it
+    bridges = gpd.GeoSeries([LineString([(30, -10), (30, 50)]),
+                             LineString([(30, 80), (60, 80)])], crs="EPSG:2056")
+    out = _under_structures(streets, bridges)
+    assert list(out[0]) == [30.0]
+    assert len(out[1]) == 0          # a bridge itself is handled as a structure
+    assert len(out[2]) == 0

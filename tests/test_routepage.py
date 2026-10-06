@@ -1,6 +1,6 @@
 """End-to-end test of the route page (the shareable map).
 
-Drives ``outputs/sf_flat_route_finder.html`` in a headless browser: the page
+Drives ``outputs/zrh_flat_route_finder.html`` in a headless browser: the page
 must load without errors, route its default trip, answer searches for an
 intersection, an address and a park, and produce a route family whose ends
 are what the slider labels promise -- the left end is the true shortest
@@ -41,10 +41,9 @@ pytestmark = [
                        reason="processed data not built"),
 ]
 
-_SEARCHES = ["24th & mission", "1234 valencia", "golden gate park", "ferry building",
-             "church st and 24th st", "coit tower", "ocean beach", "caltrain",
-             "geary blvd & 25th ave", "25th avenue and geary boulevard", "cabrillo st & 38th ave",
-             "geary blvd"]
+_SEARCHES = ["langstrasse & josefstrasse", "josefstr und langstr", "bahnhofstrasse 12",
+             "12 bahnhofstrasse", "Bahnhofstraße 12a", "bellevue", "zuerich hb", "zurich hb",
+             "hoenggerstrasse", "lindenhof", "zürich oerlikon", "paradeplatz"]
 
 _SCRIPT = """(queries) => {
     const fam = App.family, g = App.graph;
@@ -70,7 +69,7 @@ _SCRIPT = """(queries) => {
         hasAddresses: !!App.index.addr,
         frontier: { solutions: App._search.solutions.length, labels: App._search.labels,
                     expanded: App._search.expanded, truncated: App._search.truncated },
-        snap: (() => { const p = App.pointAt(-122.58, 37.76); const g = App.graph;
+        snap: (() => { const p = App.pointAt(8.565, 47.330); const g = App.graph;
             return p ? { node: p.node, pinLon: p.lon, pinLat: p.lat,
                          nodeLon: g.nodeLon(p.node), nodeLat: g.nodeLat(p.node) } : { node: -1 }; })(),
     };
@@ -101,7 +100,7 @@ def page_results():
         # change the destination without touching the slider: the line on
         # the map must be the new trip's, not the old one's
         page.evaluate("""() => {
-            const hit = App.index.search('coit tower')[0];
+            const hit = App.index.search('lindenhof')[0];
             window._hit = hit;
             App.setPoint('to', App.pointAt(hit.lon, hit.lat, hit.name), false);
             App.recompute('auto');
@@ -113,7 +112,7 @@ def page_results():
             const end = line[line.length - 1];
             return { before, after: line.length, sameAsShown: line.length === u.latlngs.length,
                      member: App.family.unique.includes(u),
-                     endsAtCoit: Math.abs(end.lat - hit.lat) < 0.004 && Math.abs(end.lng - hit.lon) < 0.004 };
+                     endsAtTarget: Math.abs(end.lat - hit.lat) < 0.004 && Math.abs(end.lng - hit.lon) < 0.004 };
         }""")
         browser.close()
     return out, errors
@@ -132,20 +131,22 @@ def test_the_page_loads_and_routes_its_default_trip(page_results):
 def test_search_finds_intersections_addresses_and_places(page_results):
     out, _ = page_results
     s = out["search"]
-    assert out["intersections"] > 5000 and out["places"] > 5000 and out["hasAddresses"]
-    assert s["24th & mission"][0] == ["24th Street & Mission Street", "intersection"]
-    assert s["church st and 24th st"][0][1] == "intersection"
-    assert s["1234 valencia"][0] == ["1234 Valencia St", "address"]
-    assert s["golden gate park"][0] == ["Golden Gate Park", "park"]
-    assert s["coit tower"][0] == ["Coit Tower", "viewpoint"]
-    assert s["ocean beach"][0] == ["Ocean Beach", "beach"]
-    assert any(n == "Caltrain" and k == "station" for n, k in s["caltrain"])
-    assert any("Ferry Building" in n for n, _ in s["ferry building"])
-    # abbreviations and full words match the same corners
-    assert s["geary blvd & 25th ave"][0] == ["25th Avenue & Geary Boulevard", "intersection"]
-    assert s["25th avenue and geary boulevard"][0] == ["25th Avenue & Geary Boulevard", "intersection"]
-    assert s["cabrillo st & 38th ave"][0] == ["38th Avenue & Cabrillo Street", "intersection"]
-    assert any(k == "intersection" and "Geary Boulevard" in n for n, k in s["geary blvd"])
+    assert out["intersections"] > 3000 and out["places"] > 5000 and out["hasAddresses"]
+    assert s["langstrasse & josefstrasse"][0] == ["Josefstrasse & Langstrasse", "intersection"]
+    assert s["josefstr und langstr"][0] == ["Josefstrasse & Langstrasse", "intersection"]
+    # Swiss address order, the other order, and the sharp s all reach it
+    assert s["bahnhofstrasse 12"][0] == ["Bahnhofstrasse 12", "address"]
+    assert s["12 bahnhofstrasse"][0] == ["Bahnhofstrasse 12", "address"]
+    assert s["Bahnhofstraße 12a"][0] == ["Bahnhofstrasse 12", "address"]
+    # tram stops outrank the POI feed's namesakes
+    assert s["bellevue"][0] == ["Bellevue", "tram/bus stop"]
+    assert s["paradeplatz"][0][0] == "Paradeplatz"
+    # umlauts fold: Zuerich, Zurich and Zürich are one word
+    assert s["zuerich hb"][0][0] == "Zürich HB"
+    assert s["zurich hb"][0][0] == "Zürich HB"
+    assert any("Hönggerstrasse" in n for n, _ in s["hoenggerstrasse"])
+    assert any(n == "Lindenhof" for n, _ in s["lindenhof"])
+    assert any(n == "Zürich Oerlikon" and k == "station" for n, k in s["zürich oerlikon"])
 
 
 def test_the_slider_ends_are_the_shortest_and_the_flattest(page_results):
@@ -183,18 +184,18 @@ def test_a_new_trip_replaces_the_drawn_route_at_once(page_results):
     """Changing an endpoint redraws without the slider being touched."""
     out, _ = page_results
     r = out["retarget"]
-    assert r["member"] and r["sameAsShown"] and r["endsAtCoit"], r
+    assert r["member"] and r["sameAsShown"] and r["endsAtTarget"], r
 
 
-def test_a_click_in_the_bay_snaps_to_the_nearest_corner(page_results):
+def test_a_click_in_the_lake_snaps_to_the_nearest_corner(page_results):
     """The pin and the route start must agree, even for a click far
     outside the street network."""
     out, _ = page_results
     r = out["snap"]
     assert r["node"] >= 0
     assert abs(r["pinLon"] - r["nodeLon"]) < 1e-9 and abs(r["pinLat"] - r["nodeLat"]) < 1e-9
-    # the Pacific, 6 km west of Ocean Beach, lands on the western shore
-    assert r["nodeLon"] > -122.52 and abs(r["nodeLat"] - 37.76) < 0.03
+    # the middle of the lake, off Wollishofen, lands on the shore
+    assert 8.53 < r["nodeLon"] < 8.60 and 47.31 < r["nodeLat"] < 47.36
 
 
 def test_the_share_link_carries_the_trip(page_results):

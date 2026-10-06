@@ -228,6 +228,8 @@ def make_backbone_map(corridors, edges, neighborhoods, passes=None,
         ax.set_ylim(b[1] - pad, b[3] + pad)
         ax.set_aspect("equal")
         ax.set_xticks([]); ax.set_yticks([])
+        # geopandas labels LV95 axes "Easting [metre]" / "Northing [metre]"
+        ax.set_xlabel(""); ax.set_ylabel("")
         for sp in ax.spines.values():
             sp.set_visible(False)
 
@@ -327,6 +329,7 @@ def make_grade_map(edges, neighborhoods, mode: str = "walk"):
         b = neighborhoods.total_bounds
         ax.set_xlim(b[0] - 500, b[2] + 500); ax.set_ylim(b[1] - 500, b[3] + 500)
         ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
+        ax.set_xlabel(""); ax.set_ylabel("")
         for sp in ax.spines.values():
             sp.set_visible(False)
         ax.set_title("Zurich street gradients", fontsize=19,

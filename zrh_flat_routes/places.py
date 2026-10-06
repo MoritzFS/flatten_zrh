@@ -11,16 +11,17 @@ Three sources, all already in hand or fetched the same way as the streets:
   data: parks, playgrounds, schools, hospitals, plazas, stations, piers,
   bridges, viewpoints, peaks and beaches, each placed on its mapped outline.
   These are authoritative and are never pruned.
-* **Places** come from Overture's places theme (Meta/Microsoft POI data):
+* **Places** come from Overture's places theme (Meta, Microsoft, Foursquare,
+  AllThePlaces and other POI data):
   landmarks, museums, shops, cafes and so on. The feed is noisy -- the same
   name recurs at several spots, some of them nowhere near the real thing --
   so a record is kept only where nearby records corroborate it, and it is
   dropped when a mapped feature already carries its name.
 * **Addresses** come from swisstopo's official directory of building
   addresses (Amtliches Verzeichnis der Gebäudeadressen, open government
-  data), deduplicated to one point per street number. Overture also carries
-  Swiss addresses, but labels their licence only as proprietary, so the
-  official register is used instead.
+  data), deduplicated to one point per street number. Overture distributes
+  the same register, but its records label the licence only as proprietary,
+  so it is taken from swisstopo directly.
 
 The hillshade base is rendered from the same swissALTI3D DEM the analysis
 uses and reprojected to WGS84 so it overlays correctly, then
@@ -93,6 +94,11 @@ BASE_CLASSES = {
     ("land_use", "marina"): "marina", ("land_use", "recreation_ground"): "park",
     ("land_use", "national_park"): "park", ("land_use", "military"): "landmark",
     ("land_use", "protected_landscape_seascape"): "park",
+    # Zurich navigates by tram and bus stop: "meet at Bellevue" means the
+    # stop, and the POI feed's own "Bellevue" is a restaurant in Affoltern
+    ("infrastructure", "platform"): "tram/bus stop",
+    ("infrastructure", "bus_stop"): "tram/bus stop",
+    ("infrastructure", "stop_position"): "tram/bus stop",
     ("infrastructure", "railway_station"): "station",
     ("infrastructure", "subway_station"): "station",
     ("infrastructure", "ferry_terminal"): "ferry", ("infrastructure", "pier"): "pier",
@@ -105,31 +111,6 @@ BASE_CLASSES = {
 _KEEP_RE = re.compile(r"park|garden|museum|station|landmark|monument|library|"
                       r"theat|school|universit|college|church|cathedral|hospital|"
                       r"beach|plaza|square|pier|market|stadium|trail|overlook", re.I)
-
-_SUFFIX = {
-    "ST": "St", "AVE": "Ave", "BLVD": "Blvd", "DR": "Dr", "RD": "Rd", "CT": "Ct",
-    "PL": "Pl", "LN": "Ln", "TER": "Ter", "WAY": "Way", "HWY": "Hwy", "PKWY": "Pkwy",
-    "CIR": "Cir", "ALY": "Aly", "SQ": "Sq", "TERR": "Ter", "STWY": "Stwy",
-    "HL": "Hl", "WALK": "Walk", "LOOP": "Loop", "ROW": "Row", "PATH": "Path",
-    "EXPY": "Expy", "PLZ": "Plz",
-}
-_DIR = {"N": "N", "S": "S", "E": "E", "W": "W"}
-
-
-def _title_street(raw: str) -> str:
-    """'JOHN MUIR DR' -> 'John Muir Dr'; keeps ordinals like '24TH' -> '24th'."""
-    out = []
-    for tok in str(raw).split():
-        if tok in _SUFFIX:
-            out.append(_SUFFIX[tok])
-        elif re.fullmatch(r"\d+(ST|ND|RD|TH)", tok):
-            out.append(tok.lower())
-        elif tok in _DIR and len(out):
-            out.append(tok)
-        else:
-            out.append(tok.capitalize() if not tok.isdigit() else tok)
-    return " ".join(out)
-
 
 def _support(names: pd.Series, lon: np.ndarray, lat: np.ndarray,
              all_names: pd.Series, all_lon: np.ndarray, all_lat: np.ndarray,
@@ -171,9 +152,19 @@ _CORE_RE = re.compile(
     r"|[,\-/]\s*(?:zh|ch|schweiz|switzerland))\s*$", re.I)
 
 
+def _fold(s: str) -> str:
+    """Lower case without diacritics, as the page's search folds text:
+    'Zürich', 'Zurich' and 'Zuerich' all become 'zurich'."""
+    import unicodedata
+    s = unicodedata.normalize("NFD", str(s).lower().replace("ß", "ss"))
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return re.sub(r"([aou])e", r"\1", s)
+
+
 def _core(name: str) -> str:
-    """'Kunsthaus Zürich' -> 'kunsthaus'."""
-    return _CORE_RE.sub("", str(name)).strip().lower()
+    """'Kunsthaus Zürich' -> 'kunsthaus'; folded, so that the POI feed's
+    'Zurich HB' and the mapped 'Zürich HB' are recognised as one name."""
+    return _fold(_CORE_RE.sub("", str(name)).strip())
 
 
 def _prune_variants(df: pd.DataFrame, radius_m: float = 500.0) -> pd.DataFrame:
@@ -190,7 +181,9 @@ def _prune_variants(df: pd.DataFrame, radius_m: float = 500.0) -> pd.DataFrame:
     names = df["name"].tolist(); groups = df["group"].tolist()
     support = df["support"].to_numpy()
     for i, n in enumerate(names):
-        first = n.split()[0].lower()
+        # split on punctuation too: the first word of 'Platzspitz, Zürich'
+        # is 'platzspitz', not 'platzspitz,'
+        first = re.split(r"[\s,\-/(]+", n.strip())[0].lower()
         dup = False
         for j in by_first.get(first, ()):
             k = names[j]
@@ -242,6 +235,14 @@ def build_base() -> pd.DataFrame:
         return pd.DataFrame(columns=["name", "group", "lon", "lat", "area"])
     df = pd.concat(frames, ignore_index=True)
     df = df[df["name"].str.len() >= 3]
+    # a stop is mapped once per platform and once per stopping position:
+    # stand each name at the median of its points, so the pin lands between
+    # the platforms rather than on one of them
+    stops = df["group"] == "tram/bus stop"
+    if stops.any():
+        med = (df[stops].groupby("name")[["lon", "lat"]].median()
+               .reset_index().assign(group="tram/bus stop", area=0.0))
+        df = pd.concat([df[~stops], med], ignore_index=True)
     # a bridge is mapped once per carriageway and a park once per polygon
     # ring: keep the largest outline under each name
     df = (df.sort_values("area", ascending=False)
@@ -257,7 +258,12 @@ def build_places() -> dict:
     base = build_base()
     t = pq.read_table(PLACES_PARQUET).to_pandas()
     names = t["names"].map(lambda n: (n or {}).get("primary") if isinstance(n, dict) else None)
-    cats = t["categories"].map(lambda c: (c or {}).get("primary") if isinstance(c, dict) else None)
+    # Overture's places schema files a record under ``taxonomy.primary``
+    # (formerly ``categories.primary``, with the same vocabulary)
+    cats = t["taxonomy"].map(lambda c: (c or {}).get("primary") if isinstance(c, dict) else None)
+    if "operating_status" in t.columns:
+        closed = t["operating_status"].fillna("open").ne("open")
+        cats = cats.where(~closed, None)
     conf = pd.to_numeric(t["confidence"], errors="coerce").fillna(0)
     import shapely
     geom = shapely.from_wkb(t["geometry"].values)
@@ -272,13 +278,29 @@ def build_places() -> dict:
     # services, after its market)
     keep |= names.notna() & cats.isna() & (conf >= 0.9)
     keep |= names.notna() & (support >= 5) & (conf >= 0.6)
+    # Foursquare's records come under Apache 2.0, whose notice obligations
+    # the page does not carry; the rest of the feed is CDLA Permissive 2.0
+    # or CC0. In Zurich every Foursquare record has no other source.
+    if "sources" in t.columns:
+        fsq = t["sources"].map(lambda ss: any((e or {}).get("dataset") == "Foursquare"
+                                              for e in (ss if ss is not None else [])))
+        keep &= ~fsq.to_numpy()
+        log.info("places: %d Foursquare records left out", int(fsq.sum()))
     df = pd.DataFrame({"name": names, "group": group.fillna("landmark"),
                        "conf": conf, "lon": lon, "lat": lat, "support": support})[keep]
     df = df[(df["lon"].between(STUDY_BBOX[0], STUDY_BBOX[1]))
             & (df["lat"].between(STUDY_BBOX[2], STUDY_BBOX[3]))]
-    df = (df.sort_values(["support", "conf"], ascending=False)
-            .drop_duplicates(["name", "group"])
-            .reset_index(drop=True))
+    df = df.sort_values(["support", "conf"], ascending=False)
+    # one record per name and kind, and 'Zurich HB' is 'Zürich HB': keep the
+    # best-supported record's position under the properly spelled name
+    df["core"] = df["name"].map(_fold)
+    proper = (df[df["name"].str.contains(r"[äöüÄÖÜàéèç]", regex=True)]
+              .drop_duplicates(["core", "group"])
+              .set_index(["core", "group"])["name"])
+    df = df.drop_duplicates(["core", "group"]).reset_index(drop=True)
+    better = [proper.get((c, g)) for c, g in zip(df["core"], df["group"])]
+    df["name"] = [b or n for b, n in zip(better, df["name"])]
+    df = df.drop(columns="core")
     # the mapped feature wins over any POI record of the same name, or of a
     # trailing part of it ('Rieterpark' for 'Museum Rietberg Rieterpark')
     mapped = set(_core(n) for n in base["name"])

@@ -62,10 +62,11 @@ def test_no_edge_exceeds_the_plausible_grade_clip(edges):
     assert edges["max_abs_grade"].max() <= ELEVATION.max_plausible_grade + 1e-9
 
 
-def test_elevations_are_in_a_sane_range_for_san_francisco(edges):
-    # Mount Davidson is 283 m; nothing should sit far below sea level
-    assert edges["elev_max"].max() < 300
-    assert edges["elev_min"].min() > -15
+def test_elevations_are_in_a_sane_range_for_zurich(edges):
+    # Uto Kulm on the Uetliberg is 870 m; the Limmat leaves the city at
+    # about 392 m
+    assert edges["elev_max"].max() < 880
+    assert edges["elev_min"].min() > 385
 
 
 def test_distance_above_thresholds_are_nested_and_bounded(directed):
@@ -85,22 +86,53 @@ def test_stairways_are_never_bicycle_traversable(directed):
 
 def test_known_flat_and_steep_streets_are_correctly_separated(edges):
     def gain_per_km(name):
+        # the mean of both directions: a street digitised downhill has
+        # almost no forward gain however steep it is
         sub = edges[edges["name"] == name]
         km = sub["length_m"].sum() / 1000
-        return sub["cum_gain_fwd"].sum() / km if km else np.nan
+        both = sub["cum_gain_fwd"].sum() + sub["cum_loss_fwd"].sum()
+        return both / 2 / km if km else np.nan
 
-    flat = gain_per_km("The Embarcadero")
-    steep = gain_per_km("Jones Street")
-    assert flat < 3.0, f"the Embarcadero should be level, got {flat:.1f} m/km"
-    assert steep > 20.0, f"Jones Street should be steep, got {steep:.1f} m/km"
+    flat = gain_per_km("Limmatquai")
+    steep = gain_per_km("Zürichbergstrasse")
+    assert flat < 5.0, f"Limmatquai should be level, got {flat:.1f} m/km"
+    assert steep > 30.0, f"Zürichbergstrasse should be steep, got {steep:.1f} m/km"
     assert steep > 8 * flat
 
 
-def test_filbert_street_matches_its_documented_gradient(edges):
-    sub = edges[(edges["name"] == "Filbert Street")
-                & (edges["cls"] == "residential")
+def test_stuessihofstatt_matches_its_tagged_gradient(edges):
+    """The Altstadt lane carries an OpenStreetMap incline tag of 17%."""
+    sub = edges[(edges["name"] == "Stüssihofstatt")
                 & (edges["length_m"] >= MIN_RELIABLE_GRADE_LENGTH_M)]
-    assert abs(sub["max_abs_grade"].max() - 0.315) < 0.05
+    assert len(sub)
+    assert abs(sub["max_abs_grade"].max() - 0.17) < 0.05
+
+
+def test_the_saddle_is_walkable_at_its_published_height(edges):
+    """The lowest crossing between the Limmat and Glatt valleys is the
+    Bucheggplatz saddle, 472 m. OpenStreetMap closes much of the street
+    there to walkers because its sidewalks are mapped separately; the
+    centreline must stand in for them, or the pass becomes unwalkable."""
+    near = edges[edges["name"].isin(["Bucheggstrasse", "Bucheggplatz",
+                                     "Rosengartenstrasse"])]
+    assert near["walk_sidepath"].any()
+    walkable = near[near["walk_ok"]]
+    assert walkable["elev_max"].min() < 474.0
+
+
+def test_unsigned_footways_are_closed_to_bicycles(edges):
+    fw = edges[edges["cls"] == "footway"]
+    assert fw["walk_ok"].mean() > 0.9
+    assert fw["bike_ok"].mean() < 0.2
+
+
+def test_covered_streets_are_treated_as_structures(edges):
+    """Bullingerstrasse passes under a building; read from the DEM it showed
+    a 54% wall."""
+    cov = edges[edges["is_covered"]]
+    assert len(cov) and cov["is_structure"].all()
+    sub = edges[edges["name"] == "Bullingerstrasse"]
+    assert sub["max_abs_grade"].max() < 0.15
 
 
 @pytest.mark.skipif(not PAIRS.exists(), reason="pair analysis not run")

@@ -17,7 +17,7 @@ def edge_table(rows):
              "geometry": LineString([(i * 100, 0), (i * 100 + 100, 0)])}
         d.update(r)
         recs.append(d)
-    return gpd.GeoDataFrame(recs, geometry="geometry", crs="EPSG:26910")
+    return gpd.GeoDataFrame(recs, geometry="geometry", crs="EPSG:2056")
 
 
 def usage_table(rows):
@@ -56,9 +56,9 @@ def test_score_rises_with_usage_and_with_breadth():
 def test_a_short_stub_is_judged_on_average_grade_not_its_maximum():
     """A 5 m DEM artefact must not disqualify an otherwise flat block.
 
-    Regression test: a 5 m connector at Market and 5th reported a 41%
-    gradient from a 1.3 m artefact, which knocked flat blocks out of
-    corridors.
+    Upstream regression test: in San Francisco a 5 m connector at Market and
+    5th reported a 41% gradient from a 1.3 m artefact, which knocked flat
+    blocks out of corridors.
     """
     e = edge_table([{"length_m": 5.0, "max_abs_grade": 0.41,
                      "avg_grade_fwd": 0.01, "grade_reliable": False}])
@@ -95,10 +95,10 @@ def test_clean_names_drops_nan_and_blanks():
 
 
 def test_canonical_name_uses_the_most_common_streets():
-    names = ["Valencia Street"] * 5 + ["Mission Street"] * 2 + [None]
+    names = ["Schaffhauserstrasse"] * 5 + ["Stampfenbachstrasse"] * 2 + [None]
     label = _canonical_name(names)
-    assert label.startswith("Valencia Street")
-    assert "Mission Street" in label
+    assert label.startswith("Schaffhauserstrasse")
+    assert "Stampfenbachstrasse" in label
 
 
 def test_canonical_name_of_all_unnamed():

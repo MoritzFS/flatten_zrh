@@ -1,0 +1,2 @@
+edge_id,pass_elev_m,basins_a,basins_b,n_basins_joined,name,cls,length_m,max_abs_grade,elev_min,elev_max,side_a,side_b,neighborhood
+70375,472.5500793457031,0,3,2,Bucheggstrasse,primary,86.21877636967918,0.006109973145425643,472.257080078125,472.5500793457031,Altstetten / Enge / Wollishofen,Seebach / Saatlen / Hirzenbach,Unterstrass

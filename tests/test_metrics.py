@@ -68,7 +68,8 @@ def test_gain_of_split_climb_equals_gain_of_whole_climb():
     """A climb cut into many edges must not lose height at each boundary.
 
     This is the regression test for the original backlash implementation,
-    which charged one dead-band per edge and lost 17 m over Twin Peaks.
+    which charged one dead-band per edge and lost 17 m over San Francisco's
+    Twin Peaks, upstream.
     """
     dist = np.arange(0, 501, 5.0)
     elev = np.linspace(0, 200, dist.size)

@@ -79,7 +79,8 @@ DATASETS: tuple[Dataset, ...] = (
         url=f"{OVERTURE_BUCKET}/{OVERTURE_PREFIX}/type=segment/",
         accessed=ACCESS_DATE,
         resolution="Vector linestrings; OSM-equivalent positional accuracy (~1-5 m)",
-        licence="ODbL 1.0 (OpenStreetMap contributors); Overture schema CDLA-Permissive 2.0",
+        licence="ODbL 1.0 (OpenStreetMap contributors; a few hundred records from "
+                "TomTom, also ODbL); Overture schema CDLA-Permissive 2.0",
         role="Routable street network: geometry, road class, per-mode access "
              "restrictions, bridge/tunnel flags and connector topology.",
         local="data/raw/overture_segments_zrh.parquet",
@@ -197,11 +198,13 @@ DATASETS: tuple[Dataset, ...] = (
     Dataset(
         key="overture_places",
         title=f"Overture Maps places (release {OVERTURE_RELEASE})",
-        publisher="Overture Maps Foundation (Meta, Microsoft and other POI sources)",
+        publisher="Overture Maps Foundation (Meta, Microsoft, AllThePlaces and "
+                  "other POI sources)",
         url=f"{OVERTURE_BUCKET}/{OVERTURE_PLACES_PREFIX}/type=place/",
         accessed=ACCESS_DATE,
         resolution="Point features with names, categories and a confidence score",
-        licence="CDLA Permissive 2.0",
+        licence="CDLA Permissive 2.0 (Meta, Microsoft, PinMeTo, DAC); CC0 1.0 "
+                "(AllThePlaces). Foursquare's records (Apache 2.0) are left out.",
         role="Offline place search in the route page (parks, landmarks, "
              "transit, schools, shops, cafes).",
         local="data/raw/overture_places_zrh.parquet",
@@ -242,9 +245,10 @@ DATASETS: tuple[Dataset, ...] = (
         limitations="One point per (street, leading house number) is kept; "
                     "letter and sub-number suffixes ('12a', '4.1') fold into "
                     "the number. Not used by the analysis itself. Overture "
-                    "also carries Swiss addresses (OpenAddresses source "
-                    "'ch/countrywide'), but labels their licence only as "
-                    "proprietary, so the official register is used instead.",
+                    "distributes the same register (via OpenAddresses, "
+                    "source 'ch/countrywide'), but its records label the "
+                    "licence only 'LicenseRef-Proprietary', so it is taken "
+                    "from swisstopo directly, under swisstopo's own terms.",
         optional=True,
     ),
 )

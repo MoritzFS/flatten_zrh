@@ -351,13 +351,17 @@ class AnalysisConfig:
 
 ANALYSIS = _apply(AnalysisConfig(), _OV)
 
-#: Where the route page opens before anyone types: Zürich HB, on the
-#: Limmat valley floor, to the Zoo on the Zürichberg, about 200 m higher.
+#: Where the route page opens before anyone types: Altstetten station, on
+#: the floor of the Limmat valley, to Oerlikon station, on the floor of the
+#: Glatt valley. Chosen by scoring pairs of well-known stations, squares and
+#: stops: the shortest walk climbs about 150 m over the shoulder of the
+#: Käferberg, the flattest keeps to the valley and crosses the ridge at the
+#: Bucheggplatz saddle for about half the climbing and 5% more distance.
 #: Each entry is (label, place names to try in order, fallback), where the
 #: fallback is a quarter's access point or a (lon, lat) pair.
 DEFAULT_TRIP = (
-    ("Zürich HB", ("Zürich HB", "Zürich Hauptbahnhof", "Hauptbahnhof Zürich"), (8.5403, 47.3779)),
-    ("Zoo Zürich", ("Zoo Zürich",), (8.5745, 47.3849)),
+    ("Zürich Altstetten", ("Zürich Altstetten",), (8.4893, 47.3913)),
+    ("Zürich Oerlikon", ("Zürich Oerlikon",), (8.5442, 47.4115)),
 )
 
 # --------------------------------------------------------------------------

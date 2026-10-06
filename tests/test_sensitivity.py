@@ -58,7 +58,7 @@ def test_run_dir_redirects_processed_and_outputs_but_not_raw(tmp_path):
     c = _config_in_subprocess({"ZFR_RUN_DIR": str(tmp_path)})
     assert c["processed"] == str(tmp_path / "processed")
     assert c["outputs"] == str(tmp_path / "outputs")
-    # raw data is shared: an experiment must never re-download 725 MB
+    # raw data is shared: an experiment must never re-download the sources
     assert c["raw"].endswith("data/raw")
 
 
@@ -67,28 +67,28 @@ def _fake_row(tag, **over):
     r = {
         "tag": tag, "params": {},
         "shortest_detour_pct": 0.0, "shortest_gain_saved_pct": 0.0,
-        "shortest_gain_ft": 480.0, "shortest_max_grade_pct": 27.0,
-        "shortest_dist_mi": 3.9,
-        "min_climb_detour_pct": 14.0, "min_climb_gain_saved_pct": 39.0,
-        "min_climb_gain_ft": 280.0, "min_climb_max_grade_pct": 17.0,
-        "min_climb_dist_mi": 4.5,
-        "grade_averse_detour_pct": 48.0, "grade_averse_gain_saved_pct": 30.0,
-        "grade_averse_gain_ft": 325.0, "grade_averse_max_grade_pct": 10.8,
-        "grade_averse_dist_mi": 5.6,
-        "balanced_detour_pct": 19.0, "balanced_gain_saved_pct": 33.0,
-        "balanced_gain_ft": 309.0, "balanced_max_grade_pct": 12.8,
-        "balanced_dist_mi": 4.6,
+        "shortest_gain_m": 77.0, "shortest_max_grade_pct": 21.8,
+        "shortest_dist_km": 4.9,
+        "min_climb_detour_pct": 5.0, "min_climb_gain_saved_pct": 27.0,
+        "min_climb_gain_m": 58.0, "min_climb_max_grade_pct": 15.0,
+        "min_climb_dist_km": 5.2,
+        "grade_averse_detour_pct": 29.0, "grade_averse_gain_saved_pct": 16.0,
+        "grade_averse_gain_m": 66.0, "grade_averse_max_grade_pct": 8.3,
+        "grade_averse_dist_km": 6.3,
+        "balanced_detour_pct": 10.0, "balanced_gain_saved_pct": 20.0,
+        "balanced_gain_m": 61.0, "balanced_max_grade_pct": 11.2,
+        "balanced_dist_km": 5.4,
         "network_gain_per_km": 21.0,
-        "grade_Filbert Street": 32.9, "grade_Jones Street": 31.1,
-        "grade_22nd Street": 32.6, "grade_Bradford Street": 33.1,
-        "gainkm_The Embarcadero": 1.1, "gainkm_Valencia Street": 6.0,
-        "gainkm_Market Street": 14.0,
-        "top_corridors": ["Valencia Street - X", "JFK - Y", "Mission Street"],
-        "corridor_count": 50, "top_corridor_km": 6.9,
-        "top_pass_ft": 255.0, "top_pass_pairs": 119, "top_pass_nbhd": "Golden Gate Park",
-        "n_passes": 35, "wiggle_excess_flat_m": 5.9,
-        "wiggle_excess_shortest_m": 19.2, "wiggle_discovered": True,
-        "dem_rms_m": 0.68,
+        "grade_Stüssihofstatt": 15.7, "grade_Trittligasse": 22.7,
+        "grade_Kirchgasse": 14.4, "grade_Kantonsschulstrasse": 12.1,
+        "gainkm_Limmatquai": 2.9, "gainkm_Bahnhofstrasse": 2.0,
+        "gainkm_Mythenquai": 1.5,
+        "top_corridors": ["Schaffhauserstrasse - X", "Limmatquai - Y", "Manessestrasse"],
+        "corridor_count": 34, "top_corridor_km": 8.1,
+        "top_pass_m": 472.6, "top_pass_pairs": 114, "top_pass_nbhd": "Unterstrass",
+        "n_passes": 33, "saddle_pass_m": 472.6, "saddle_pass_street": "Bucheggstrasse",
+        "saddle_on_saddle": True, "saddle_bike_flat_high_m": 472.0,
+        "dem_rms_m": 1.97,
     }
     r.update(over)
     return r
@@ -102,7 +102,7 @@ def test_writer_produces_csv_and_markdown(tmp_path, monkeypatch):
     df = pd.DataFrame([
         _fake_row("baseline"),
         _fake_row("spacing_10m", min_climb_gain_saved_pct=36.0,
-                  top_corridors=["Valencia Street - X", "Other", "Mission Street"]),
+                  top_corridors=["Schaffhauserstrasse - X", "Other", "Manessestrasse"]),
     ]).set_index("tag")
     S._write(df)
     md = (tmp_path / "s.md").read_text()
@@ -134,8 +134,8 @@ def test_edge_overlap_is_length_weighted():
     assert _edge_overlap({}, {}) == 100.0
     import math
     assert math.isnan(_edge_overlap(None, b))
-    assert _lead_streets(["Valencia Street - 16th Street", "Mission Street", ""]) == {
-        "Valencia Street", "Mission Street"}
+    assert _lead_streets(["Limmatquai - Bahnhofquai", "Manessestrasse", ""]) == {
+        "Limmatquai", "Manessestrasse"}
 
 
 def test_grid_is_one_at_a_time_around_the_baseline():

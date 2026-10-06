@@ -14,7 +14,7 @@ name: Mirror source data
 on:
   workflow_dispatch:
   push:
-    branches: [claude/optimistic-gates-l0pbj3]
+    branches: [main]
     paths: ["scripts/mirror_sources.py", ".github/workflows/mirror-data.yml"]
 
 permissions:

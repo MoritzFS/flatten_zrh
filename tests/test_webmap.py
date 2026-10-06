@@ -37,11 +37,11 @@ playwright = pytest.importorskip("playwright.sync_api",
 
 #: Pairs chosen to span flat and hilly parts of the city, and both modes.
 PAIRS = [
-    ("Mission", "Outer Sunset"), ("Noe Valley", "Financial District"),
-    ("Inner Richmond", "Downtown/Civic Center"), ("Bayview", "Golden Gate Park"),
-    ("Bernal Heights", "Marina"), ("Chinatown", "Inner Sunset"),
-    ("Excelsior", "South of Market"), ("Potrero Hill", "Western Addition"),
-    ("Presidio", "Visitacion Valley"), ("Twin Peaks", "Marina"),
+    ("Langstrasse", "Witikon"), ("City", "Höngg"),
+    ("Altstetten", "Fluntern"), ("Wollishofen", "Oerlikon"),
+    ("Seefeld", "Wipkingen"), ("Enge", "Hottingen"),
+    ("Affoltern", "Rathaus"), ("Friesenberg", "Escher Wyss"),
+    ("Leimbach", "Unterstrass"), ("Hirzenbach", "Werd"),
 ]
 
 
@@ -192,7 +192,7 @@ def warp_result():
             "App.warp && !document.getElementById('busy').classList.contains('on')",
             timeout=180_000)
         out = page.evaluate("""() => {
-            const f = Warp.frame(37.76, -122.44), pts = App.DATA.points.walk, shift = {};
+            const f = Warp.frame(47.377, 8.535), pts = App.DATA.points.walk, shift = {};
             for (const n of Object.keys(pts)) {
                 const [lon, lat] = pts[n];
                 const [wlon, wlat] = App.warp.transform(lon, lat);
@@ -291,12 +291,12 @@ def test_the_warp_fits_the_cost_matrix_reasonably(warp_result):
     assert out["stress"] < 0.25, f"stress {out['stress']:.3f} is too high to read"
 
 
-def test_hilly_neighborhoods_move_more_than_flat_ones(warp_result):
-    """The whole point: a ridge pushes places apart; the flats stay put."""
+def test_hilly_quarters_move_more_than_flat_ones(warp_result):
+    """The whole point: a slope pushes places apart; the flats stay put."""
     out, _ = warp_result
     s = out["shift"]
-    hilly = max(s.get("Twin Peaks", 0), s.get("West of Twin Peaks", 0))
-    flat = min(s.get("Mission", 1e9), s.get("South of Market", 1e9),
-               s.get("Financial District", 1e9))
+    hilly = max(s.get("Witikon", 0), s.get("Fluntern", 0))
+    flat = min(s.get("Langstrasse", 1e9), s.get("Hard", 1e9),
+               s.get("Gewerbeschule", 1e9))
     assert hilly > 2 * flat, f"hilly {hilly:.0f} m vs flat {flat:.0f} m"
-    assert hilly > 1500
+    assert hilly > 500
