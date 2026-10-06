@@ -1,10 +1,12 @@
-/* San Francisco flat routes -- the route page.
+/* Zurich flat routes -- the route page. Ported from flattensf by Drew
+ * Edwards (MIT licence); the method and most of this file are theirs, with
+ * metric units and German-language search added for Zurich.
  *
  * One card: where from, where to, and a slider from the shortest route to
  * the flattest. Everything runs in the page: the graph and the cost model
  * come from engine.js, and place search is an offline index built from the
  * graph's own street names plus Overture places and addresses packed into
- * the bundle (see sf_flat_routes/places.py).
+ * the bundle (see zrh_flat_routes/places.py).
  *
  * The slider is a family of routes, not one route: the whole frontier of
  * distance against climbing between the two points, every route that no
@@ -21,17 +23,15 @@
 "use strict";
 
 (function () {
-  const MI = 1609.344, FT = 3.28084;
   const $ = (id) => document.getElementById(id);
   const DATA = window.DATA;
 
-  /* lambda sweep for the slider; the min-climb objective is appended as
-   * the last stop so the right-hand end is literally "fewest feet climbed" */
   /* The flat end of the frontier is where a metre of climb is worth
    * ALPHA_MAX metres of walking (the analysis's minimum-climb weight is
-   * 120). Past about 200 the router starts walking miles to save a few feet
-   * (7.5 miles instead of 4.6 to save 55 ft, on the default trip), which
-   * nobody would call a route, so the frontier is cut there. */
+   * 120). Upstream found that past about 200 the router starts walking
+   * kilometres to save a few metres of climb (12 km instead of 7.4 to save
+   * 17 m, on San Francisco's default trip), which nobody would call a
+   * route, so the frontier is cut there. */
   const ALPHA_MAX = 200;
   /* frontier points closer than this in climbing are merged */
   const EPS_GAIN_CM = 50;
@@ -58,22 +58,26 @@
     return "rgb(" + stops[i].map((v, c) => Math.round(lerp(v, stops[i + 1][c], k))).join(",") + ")";
   }
 
-  const fmtMi = (m) => (m / MI < 10 ? (m / MI).toFixed(1) : Math.round(m / MI)) + "<small>mi</small>";
-  const fmtFt = (m) => Math.round(m * FT).toLocaleString() + "<small>ft</small>";
+  const fmtKm = (m) => (m < 10000 ? (m / 1000).toFixed(1) : Math.round(m / 1000)) + "<small>km</small>";
+  const fmtM = (m) => Math.round(m).toLocaleString("de-CH") + "<small>m</small>";
   const fmtPct = (g) => (g * 100).toFixed(g * 100 < 10 ? 1 : 0) + "<small>%</small>";
 
   /* -------------------------------------------------------- text matching */
-  /* Street-type words collapse to their abbreviations on both the index and
-   * the query, so "Geary Blvd", "Geary Boulevard" and "geary" all match. */
-  const ABBREV = { street: "st", avenue: "ave", boulevard: "blvd", drive: "dr", road: "rd",
-    court: "ct", place: "pl", lane: "ln", terrace: "ter", highway: "hwy", parkway: "pkwy",
-    circle: "cir", alley: "aly", square: "sq", stairway: "stwy", stairs: "stwy", way: "wy",
-    north: "n", south: "s", east: "e", west: "w", saint: "st", mount: "mt" };
-  const norm = (s) => s.toLowerCase()
+  /* Both the index and the query are folded the same way, so "Zürich",
+   * "Zurich" and "Zuerich" match, as do "Straße" and "Strasse". Swiss
+   * street names are mostly one word ("Bahnhofstrasse"), so a typed
+   * "Bahnhofstr." already matches as a prefix; the separate-word forms
+   * ("Bahnhof Str.") are spelled out and joined on. */
+  const ABBREV = { str: "strasse", strasse: "strasse", pl: "platz", st: "sankt" };
+  const fold = (s) => s.toLowerCase().replace(/ß/g, "ss")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/(a|o|u)e/g, "$1");
+  const norm = (s) => fold(s)
     .replace(/[’']/g, "")
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ").trim()
-    .split(" ").map((w) => ABBREV[w] || w).join(" ");
+    .split(" ").map((w) => ABBREV[w] || w).join(" ")
+    .replace(/ (strasse|gasse|platz)\b/g, "$1");
 
   /* 0 exact, 1 starts with, 2 every token is a word prefix, 3 substring, -1 none */
   function matchScore(nn, q, toks) {
@@ -115,7 +119,7 @@
       }
     }
 
-    /* "24th St & Mission St": a node with two or more distinct street names */
+    /* "Langstrasse & Josefstrasse": a node with two or more distinct street names */
     buildIntersections() {
       const g = this.graph, geom = this.geom;
       const per = new Array(g.n);
@@ -167,10 +171,11 @@
       const qq = q.replace(/ /g, "");
       const out = [];
 
-      // "1234 Valencia" -- a street address
-      const am = /^(\d+)\s+(\D.*)$/.exec(q);
+      // "Langstrasse 12a" -- a street address, Swiss order (or "12 Langstrasse")
+      const am = /^(\D.*?)\s+(\d+)\s*[a-z]?(?:\s+\d+)?$/.exec(q) || /^(\d+)\s*[a-z]?\s+(\D.*)$/.exec(q);
       if (am && this.addr) {
-        const want = +am[1], sq = am[2], stoks = sq.split(" ");
+        const swiss = /^\D/.test(am[1]);
+        const want = +(swiss ? am[2] : am[1]), sq = swiss ? am[1] : am[2], stoks = sq.split(" ");
         const hits = [];
         for (let i = 0; i < this.addr.streets.length; i++) {
           const sc = matchScore(this.addr.nn[i], sq, stoks);
@@ -186,14 +191,14 @@
           if (l > lo && Math.abs(a.number[l - 1] - want) < Math.abs(a.number[l] - want)) best = l - 1;
           const num = a.number[best];
           const exact = num === want;
-          out.push({ score: exact ? -1 : sc, name: num + " " + a.streets[si],
+          out.push({ score: exact ? -1 : sc, name: a.streets[si] + " " + num,
             kind: exact ? "address" : "nearest address", rank: 0,
             lon: a.origin[0] + a.lon[best] * a.step, lat: a.origin[1] + a.lat[best] * a.step });
         }
       }
 
-      // "24th & mission" -- an intersection
-      const parts = raw.toLowerCase().split(/\s+(?:and|at)\s+|\s*[&\/@+]\s*/).map(norm).filter(Boolean);
+      // "langstrasse & josefstrasse" -- an intersection
+      const parts = raw.toLowerCase().split(/\s+(?:and|at|und|x)\s+|\s*[&\/@+]\s*/).map(norm).filter(Boolean);
       if (parts.length === 2) {
         for (const it of this.intersections) {
           let ok = 0;
@@ -321,11 +326,11 @@
     buildMap() {
       const map = L.map("map", {
         zoomControl: false, attributionControl: true, preferCanvas: true,
-        center: [37.765, -122.44], zoom: 12, minZoom: 11, maxZoom: 18, zoomSnap: 0.5,
+        center: [47.377, 8.535], zoom: 12, minZoom: 11, maxZoom: 18, zoomSnap: 0.5,
       });
       map.attributionControl.setPrefix("");
       map.attributionControl.addAttribution(
-        "Streets © <a href='https://overturemaps.org'>Overture</a> / <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> · Elevation USGS 3DEP");
+        "Streets © <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors via <a href='https://overturemaps.org'>Overture</a> · Elevation, addresses © <a href='https://www.swisstopo.admin.ch'>swisstopo</a> · Quarters <a href='https://data.stadt-zuerich.ch'>Stadt Zürich</a>");
       L.control.zoom({ position: "bottomright" }).addTo(map);
       this.map = map;
 
@@ -371,7 +376,7 @@
     },
     /* A point is always a routable street corner: whatever was clicked or
      * searched snaps to the nearest one, so the pin sits where the route
-     * actually starts rather than in the bay or the middle of a park. */
+     * actually starts rather than in the lake or the middle of a park. */
     pointAt(lon, lat, label) {
       const node = this.nearestNode(lon, lat);
       if (node < 0) return null;
@@ -738,8 +743,8 @@
       box.hidden = runs.length === 0;
       const s = u.stats, p = prevU.stats;
       tween(260, (k) => {
-        $("v_dist").innerHTML = fmtMi(lerp(p.distance_m, s.distance_m, k));
-        $("v_climb").innerHTML = fmtFt(lerp(p.elev_gain_m, s.elev_gain_m, k));
+        $("v_dist").innerHTML = fmtKm(lerp(p.distance_m, s.distance_m, k));
+        $("v_climb").innerHTML = fmtM(lerp(p.elev_gain_m, s.elev_gain_m, k));
         $("v_grade").innerHTML = fmtPct(lerp(p.max_grade, s.max_grade, k));
       });
       const sh = this.family.shortest.stats;
@@ -752,9 +757,9 @@
         const pd = sh.distance_m ? Math.round(100 * dd / sh.distance_m) : 0;
         const pc = sh.elev_gain_m ? Math.round(100 * dc / sh.elev_gain_m) : 0;
         const longer = dd < 80 ? "about the same distance"
-          : "<b class='up'>+" + (dd / MI).toFixed(1) + " mi</b> (" + pd + "% longer)";
+          : "<b class='up'>+" + (dd / 1000).toFixed(1) + " km</b> (" + pd + "% longer)";
         const less = dc <= 0 ? "no less climbing"
-          : "<b class='down'>−" + Math.round(dc * FT).toLocaleString() + " ft</b> of climbing (" + pc + "% less)";
+          : "<b class='down'>−" + Math.round(dc).toLocaleString("de-CH") + " m</b> of climbing (" + pc + "% less)";
         $("delta").innerHTML = "vs. shortest: " + longer + ", " + less;
       }
     },
@@ -804,10 +809,10 @@
       ctx.fillStyle = css("--muted"); ctx.font = "500 10px " + css("--mono");
       ctx.textBaseline = "alphabetic";
       let hi = 0; for (let i = 1; i < n; i++) if (z[i] > z[hi]) hi = i;
-      const lab = (v) => Math.round(v * FT) + " ft";
+      const lab = (v) => Math.round(v) + " m";
       ctx.textAlign = "left"; ctx.fillText(lab(z[0]), padL, H - 5);
       ctx.textAlign = "right"; ctx.fillText(lab(z[n - 1]), W - padR, H - 5);
-      ctx.textAlign = "center"; ctx.fillText((dist / MI).toFixed(1) + " mi", W / 2, H - 5);
+      ctx.textAlign = "center"; ctx.fillText((dist / 1000).toFixed(1) + " km", W / 2, H - 5);
       if (hi > n * 0.06 && hi < n * 0.94 && z[hi] - Math.min(z[0], z[n - 1]) > 6) {
         ctx.textAlign = X(hi) < 40 ? "left" : X(hi) > W - 40 ? "right" : "center";
         ctx.fillStyle = css("--ink");
@@ -894,10 +899,9 @@
   }
 
   /* ------------------------------------------------------------- helpers */
-  const STREET_SHORT = { Street: "St", Avenue: "Ave", Boulevard: "Blvd", Drive: "Dr", Road: "Rd",
-    Terrace: "Ter", Place: "Pl", Court: "Ct", Lane: "Ln", Highway: "Hwy", Parkway: "Pkwy" };
+  /* "Bahnhofstrasse" -> "Bahnhofstr.", as on Swiss maps and signs */
   function shortStreet(name) {
-    return String(name).split(" ").map((w) => STREET_SHORT[w] || w).join(" ");
+    return String(name).replace(/strasse\b/g, "str.").replace(/\bStrasse\b/g, "Str.");
   }
 
   /* Keep at most k members, spread evenly along the frontier's length in

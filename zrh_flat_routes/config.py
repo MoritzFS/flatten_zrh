@@ -12,25 +12,30 @@ from pathlib import Path
 # --------------------------------------------------------------------------
 # Paths
 # --------------------------------------------------------------------------
-PROJECT_ROOT = Path(os.environ.get("SFFR_ROOT", Path(__file__).resolve().parent.parent))
+PROJECT_ROOT = Path(os.environ.get("ZFR_ROOT", Path(__file__).resolve().parent.parent))
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
-#: ``SFFR_RUN_DIR`` redirects every processed and output path under one
+#: ``ZFR_RUN_DIR`` redirects every processed and output path under one
 #: directory, so an experiment (see ``sensitivity.py``) can rebuild the whole
 #: pipeline with different parameters without touching the main results.
-_RUN_DIR = os.environ.get("SFFR_RUN_DIR")
+_RUN_DIR = os.environ.get("ZFR_RUN_DIR")
 PROCESSED_DIR = Path(_RUN_DIR) / "processed" if _RUN_DIR else DATA_DIR / "processed"
 OUTPUT_DIR = Path(_RUN_DIR) / "outputs" if _RUN_DIR else PROJECT_ROOT / "outputs"
 #: The route finder as a static site, deployed to GitHub Pages from here.
 SITE_DIR = Path(_RUN_DIR) / "site" if _RUN_DIR else PROJECT_ROOT / "site"
-#: The product is "flattensf"; the Python package keeps its older name.
-PRODUCT_NAME = "Flatten SF"
-REPO_URL = "https://github.com/almostimplemented/flattensf"
-#: The host the site answers on. Pages serves the custom domain on www and
-#: redirects the apex to it, so links, the canonical URL and the social
-#: preview image all use www; the CNAME file carries the same host.
-SITE_DOMAIN = "www.flattensf.com"
-SITE_URL = f"https://{SITE_DOMAIN}/"
+#: The product, a Zurich port of Drew Edwards' Flatten SF.
+PRODUCT_NAME = "Flatten Zürich"
+REPO_URL = "https://github.com/MoritzFS/flatten_zrh"
+#: The project this one is ported from, credited on the site and in the README.
+UPSTREAM_NAME = "Flatten SF"
+UPSTREAM_URL = "https://github.com/almostimplemented/flattensf"
+UPSTREAM_SITE = "https://flattensf.com/"
+UPSTREAM_AUTHOR = "Drew Edwards"
+UPSTREAM_AUTHOR_URL = "https://almostimplemented.com"
+#: The site is a GitHub Pages project site: no custom domain, so no CNAME
+#: file is written, and every URL lives under the repository's path.
+SITE_DOMAIN = "moritzfs.github.io"
+SITE_URL = f"https://{SITE_DOMAIN}/flatten_zrh/"
 
 for _d in (RAW_DIR, PROCESSED_DIR, OUTPUT_DIR):
     _d.mkdir(parents=True, exist_ok=True)
@@ -41,44 +46,44 @@ for _d in (RAW_DIR, PROCESSED_DIR, OUTPUT_DIR):
 #: Geographic CRS of the source vector data (Overture) and of all map output.
 CRS_GEOGRAPHIC = "EPSG:4326"
 #: Projected CRS used for *every* length, slope and distance computation.
-#: NAD83 / UTM zone 10N -- the native CRS of the USGS 3DEP 1 m tiles for SF,
-#: so elevation sampling needs no reprojection of the raster.
-CRS_PROJECTED = "EPSG:26910"
+#: CH1903+ / LV95 -- the native CRS of swisstopo's swissALTI3D tiles and of
+#: the City of Zurich's boundaries, so elevation sampling needs no
+#: reprojection of the raster.
+CRS_PROJECTED = "EPSG:2056"
 
 # --------------------------------------------------------------------------
 # Study area
 # --------------------------------------------------------------------------
 #: Analysis bounding box (lon_min, lon_max, lat_min, lat_max).
-#: Covers the City & County of San Francisco land area plus a small margin.
-#: Deliberately excludes the Marin headlands and the Farallones.
-SF_BBOX = (-122.5200, -122.3300, 37.6950, 37.8350)
+#: The City of Zurich spans 8.447-8.627 E, 47.319-47.435 N; the box adds a
+#: margin of about a kilometre, inside the swissALTI3D tiles mirrored for it.
+STUDY_BBOX = (8.4300, 8.6450, 47.3100, 47.4450)
 
-#: Treasure Island / Yerba Buena Island are part of SF but are only reachable
-#: via the Bay Bridge (no pedestrian access to the western span) so they are
-#: excluded from neighborhood-pair routing.
-EXCLUDED_NEIGHBORHOODS = ("Treasure Island/YBI",)
+#: Every one of Zurich's 34 statistical quarters is reachable on foot and by
+#: bicycle, so none is excluded from pair routing.
+EXCLUDED_NEIGHBORHOODS: tuple = ()
 
 # --------------------------------------------------------------------------
 # Elevation sampling / smoothing
 # --------------------------------------------------------------------------
 @dataclass(frozen=True)
 class ElevationConfig:
-    #: Spacing (m) of elevation samples along each edge. 5 m was chosen
-    #: empirically: at 10 m spacing the short steep pitches that give San
-    #: Francisco its reputation were measurably clipped (Bradford St came out
-    #: at 36.8% against a documented 41%, Prentiss St at 32.9% against 37%),
-    #: while 5 m recovers them. Cost is ~1M sample points citywide.
+    #: Spacing (m) of elevation samples along each edge. Upstream chose 5 m
+    #: empirically for San Francisco: at 10 m spacing the short steep pitches
+    #: that give that city its reputation were measurably clipped, while 5 m
+    #: recovers them. Zurich keeps the same spacing; with the 2 m DEM it is
+    #: still more than two cells per sample.
     sample_spacing_m: float = 5.0
     #: Minimum number of samples per edge (endpoints always included).
     min_samples: int = 3
     #: Half-width (m) of the Savitzky-Golay window applied along the profile.
     #: 25 m either side => ~50 m window, shorter than a city block, so real
     #: block-scale grade is preserved while curb/vehicle/vegetation artefacts
-    #: in the lidar DEM are suppressed. Narrower windows were tested and
-    #: rejected: at a 12.5 m half-width, localised DEM artefacts on 22nd St
-    #: and Baden St survived and pushed those streets to the 60% plausibility
-    #: clip, whereas 25 m returns 32.9% and 30.6% against documented values
-    #: of 31.5% and 32%.
+    #: in the DEM are suppressed. Upstream tested narrower windows in San
+    #: Francisco and rejected them: at a 12.5 m half-width localised lidar
+    #: artefacts survived and pushed two streets to the 60% plausibility clip.
+    #: The sensitivity run (``python -m zrh_flat_routes sensitivity``)
+    #: repeats that test for Zurich.
     smooth_window_m: float = 25.0
     #: Polynomial order of the Savitzky-Golay filter.
     smooth_polyorder: int = 2
@@ -87,34 +92,36 @@ class ElevationConfig:
     #: street accumulates tens of metres of phantom climbing from DEM noise.
     gain_deadband_m: float = 0.5
     #: Grades above this magnitude are treated as DEM artefacts and clipped.
-    #: Filbert St between Hyde and Leavenworth is ~31.5%, the steepest
-    #: drivable street in SF; public stairways reach ~50%+, so the clip is
-    #: generous and only removes physically impossible values.
+    #: Zurich's steepest streets are in the 15-25% range and its stairways
+    #: (the many ``Stägen`` up the Zürichberg and Käferberg) reach 50% and
+    #: more, so the clip is generous and only removes physically impossible
+    #: values.
     max_plausible_grade: float = 0.60
     #: Elevation on bridges/tunnels is taken as a linear interpolation between
     #: the endpoints instead of from the DEM (the DEM samples the ground or
     #: water surface beneath the structure).
     interpolate_structures: bool = True
     #: Standard deviation (m) of the Gaussian applied to the DEM before any
-    #: sampling. 3 m is far narrower than a street and far narrower than the
-    #: block scale on which real gradient varies; 0 disables it.
+    #: sampling. 3 m is narrower than a street and far narrower than the
+    #: block scale on which real gradient varies; 0 disables it. On the 2 m
+    #: swissALTI3D grid it spans 1.5 cells.
     dem_sigma_m: float = 3.0
 
 
 def _overrides() -> dict:
-    """Parameter overrides from ``SFFR_OVERRIDES`` (a JSON object).
+    """Parameter overrides from ``ZFR_OVERRIDES`` (a JSON object).
 
     Used by the sensitivity harness to rebuild the pipeline under different
     settings. Keys are ``ElevationConfig`` or ``AnalysisConfig`` field names.
     """
-    raw = os.environ.get("SFFR_OVERRIDES")
+    raw = os.environ.get("ZFR_OVERRIDES")
     if not raw:
         return {}
     import json
     try:
         return dict(json.loads(raw))
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"SFFR_OVERRIDES is not a JSON object: {raw!r}") from exc
+        raise ValueError(f"ZFR_OVERRIDES is not a JSON object: {raw!r}") from exc
 
 
 _OV = _overrides()
@@ -140,10 +147,10 @@ GRADE_THRESHOLDS = (0.03, 0.05, 0.08, 0.10, 0.15)
 GRADE_PERCENTILE = 95
 
 #: Minimum edge length (m) for its *maximum* grade to be treated as reliable.
-#: Over a 5 m stub a single decimetre of DEM artefact reads as a 20% grade;
-#: the worst real example found was a 5 m connector at Market and 5th which
-#: reported 41%. Short edges keep their metrics but are excluded from
-#: maximum-grade tests, which are instead judged on average grade.
+#: Over a 5 m stub a single decimetre of DEM artefact reads as a 20% grade
+#: (upstream's worst real case was a 5 m connector in San Francisco reading
+#: 41%). Short edges keep their metrics but are excluded from maximum-grade
+#: tests, which are instead judged on average grade.
 MIN_RELIABLE_GRADE_LENGTH_M = 15.0
 
 # --------------------------------------------------------------------------
@@ -187,7 +194,7 @@ class CostWeights:
     #: Whether the mode's per-class comfort multipliers apply. The "shortest"
     #: objective sets this False so that it minimises *distance only*, as the
     #: analysis specification requires. Without the flag, the bicycle comfort
-    #: weights (19th Ave at 1.9x, protected cycleway at 0.85x) made the
+    #: weights (trunk roads at 1.9x, protected cycleway at 0.85x) made the
     #: "shortest" bicycle route longer in real metres than the flat route,
     #: which made every distance-penalty comparison meaningless.
     use_class_multiplier: bool = True
@@ -290,7 +297,7 @@ BIKE = ModeConfig(
         "cycleway": 0.85,       # protected/dedicated bike infrastructure
         "living_street": 0.9,
         "residential": 0.95,
-        "trunk": 1.9,           # e.g. 19th Ave, Van Ness -- high stress
+        "trunk": 1.9,           # e.g. Rosengartenstrasse -- high stress
         "primary": 1.45,
         "secondary": 1.2,
         "footway": 1.5,         # rideable only where bicycles are permitted
@@ -304,6 +311,15 @@ MODES: dict[str, ModeConfig] = {"walk": WALK, "bike": BIKE}
 
 #: Classes bicycles may never use even when the class list would allow it.
 BIKE_FORBIDDEN_CLASSES = frozenset({"steps", "bridleway"})
+
+#: Classes bicycles may use only where an access rule explicitly permits
+#: them. Swiss signage law closes footpaths (sign 2.61) and pedestrian zones
+#: (2.59.3) to bicycles unless a supplementary plate admits them, and Swiss
+#: OpenStreetMap leaves that default implicit: of ~44,000 footway segments in
+#: the Zurich extract, 41,000 carry no bicycle rule at all, against about
+#: 1,100 that explicitly allow or designate bicycles. Upstream, whose San
+#: Francisco network has no such default, treats a missing rule as allowed.
+BIKE_PERMIT_REQUIRED_CLASSES = frozenset({"footway", "pedestrian"})
 
 # --------------------------------------------------------------------------
 # Analysis parameters
@@ -335,35 +351,37 @@ class AnalysisConfig:
 
 ANALYSIS = _apply(AnalysisConfig(), _OV)
 
-# --------------------------------------------------------------------------
-# Representative neighborhood pairs highlighted in the written analysis
-# --------------------------------------------------------------------------
-FEATURED_PAIRS = (
-    ("Mission", "Outer Sunset"),
-    ("Inner Richmond", "Downtown/Civic Center"),
-    ("Mission", "Marina"),
-    ("Bayview", "Golden Gate Park"),
-    ("Noe Valley", "Financial District"),
-    ("Outer Richmond", "Mission"),
-    ("Excelsior", "South of Market"),
-    ("Haight Ashbury", "Financial District"),
-    ("Parkside", "Downtown/Civic Center"),
-    ("Bernal Heights", "Marina"),
-    ("Potrero Hill", "Western Addition"),
-    ("West of Twin Peaks", "Downtown/Civic Center"),
-    ("Visitacion Valley", "Mission"),
-    ("Chinatown", "Inner Sunset"),
+#: Where the route page opens before anyone types: Zürich HB, on the
+#: Limmat valley floor, to the Zoo on the Zürichberg, about 200 m higher.
+#: Each entry is (label, place names to try in order, fallback), where the
+#: fallback is a quarter's access point or a (lon, lat) pair.
+DEFAULT_TRIP = (
+    ("Zürich HB", ("Zürich HB", "Zürich Hauptbahnhof", "Hauptbahnhof Zürich"), (8.5403, 47.3779)),
+    ("Zoo Zürich", ("Zoo Zürich",), (8.5745, 47.3849)),
 )
 
-#: Validation targets -- well known flat corridors and steep streets used as
-#: sanity checks on the elevation model (see ``validate`` command).
-VALIDATION_FLAT = (
-    "The Wiggle", "Market Street", "Valencia Street", "The Embarcadero",
-    "Great Highway", "Alemany Boulevard", "San Jose Avenue", "Illinois Street",
-)
-VALIDATION_STEEP = (
-    "Filbert Street", "22nd Street", "Jones Street", "Divisadero Street",
-    "Lombard Street", "Duboce Avenue",
+# --------------------------------------------------------------------------
+# Representative quarter pairs highlighted in the written analysis
+# --------------------------------------------------------------------------
+#: Zurich's 34 statistical quarters stand in for San Francisco's
+#: neighborhoods. The pairs span the city's three kinds of trip: along the
+#: Limmat valley floor, up the moraine slopes of the Zürichberg and the
+#: Uetliberg, and over the Käferberg-Zürichberg ridge into the Glatt valley.
+FEATURED_PAIRS = (
+    ("Langstrasse", "Witikon"),
+    ("City", "Höngg"),
+    ("Altstetten", "Fluntern"),
+    ("Wollishofen", "Oerlikon"),
+    ("Seefeld", "Wipkingen"),
+    ("Enge", "Hottingen"),
+    ("Albisrieden", "Hochschulen"),
+    ("Affoltern", "Rathaus"),
+    ("Friesenberg", "Escher Wyss"),
+    ("Seebach", "Enge"),
+    ("Hirzenbach", "Werd"),
+    ("Leimbach", "Unterstrass"),
+    ("Hirslanden", "Hard"),
+    ("Saatlen", "Alt-Wiedikon"),
 )
 
 

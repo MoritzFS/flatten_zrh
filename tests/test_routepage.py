@@ -17,8 +17,8 @@ import os
 
 import pytest
 
-from sf_flat_routes.config import PROCESSED_DIR
-from sf_flat_routes.viz_interactive import SIMPLE_HTML, SITE_INDEX
+from zrh_flat_routes.config import PROCESSED_DIR
+from zrh_flat_routes.viz_interactive import SIMPLE_HTML, SITE_INDEX
 
 playwright = pytest.importorskip("playwright.sync_api",
                                  reason="playwright is not installed")
@@ -36,7 +36,7 @@ def _chromium() -> str | None:
 
 pytestmark = [
     pytest.mark.skipif(not SIMPLE_HTML.exists(),
-                       reason="route page not built; run `python -m sf_flat_routes map`"),
+                       reason="route page not built; run `python -m zrh_flat_routes map`"),
     pytest.mark.skipif(not (PROCESSED_DIR / "edges_directed.parquet").exists(),
                        reason="processed data not built"),
 ]
@@ -211,10 +211,10 @@ def test_the_frontier_contains_every_weighted_optimum(page_results):
     no more, under Python's own evaluation, than Python's route for that
     alpha between the same two nodes. This pins the browser's frontier
     search to the analysis's cost model."""
-    from sf_flat_routes.config import ROUTING_PROFILES, with_alpha
-    from sf_flat_routes.pipeline import build_context
-    from sf_flat_routes.routing import route
-    from sf_flat_routes.utils import configure_gdal_for_proxy
+    from zrh_flat_routes.config import ROUTING_PROFILES, with_alpha
+    from zrh_flat_routes.pipeline import build_context
+    from zrh_flat_routes.routing import route
+    from zrh_flat_routes.utils import configure_gdal_for_proxy
 
     out, _ = page_results
     configure_gdal_for_proxy()

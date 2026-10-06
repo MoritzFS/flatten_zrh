@@ -17,7 +17,7 @@ not asserted.
 Skipped unless Playwright, a Chromium build and a built map are all present:
 
     pip install playwright && playwright install chromium
-    python -m sf_flat_routes map
+    python -m zrh_flat_routes map
 """
 from __future__ import annotations
 
@@ -29,8 +29,8 @@ from pathlib import Path
 
 import pytest
 
-from sf_flat_routes.config import PROCESSED_DIR
-from sf_flat_routes.viz_interactive import INTERACTIVE_HTML
+from zrh_flat_routes.config import PROCESSED_DIR
+from zrh_flat_routes.viz_interactive import INTERACTIVE_HTML
 
 playwright = pytest.importorskip("playwright.sync_api",
                                  reason="playwright is not installed")
@@ -58,7 +58,7 @@ def _chromium() -> str | None:
 
 pytestmark = [
     pytest.mark.skipif(not INTERACTIVE_HTML.exists(),
-                       reason="map not built; run `python -m sf_flat_routes map`"),
+                       reason="map not built; run `python -m zrh_flat_routes map`"),
     pytest.mark.skipif(not (PROCESSED_DIR / "edges_directed.parquet").exists(),
                        reason="processed data not built"),
 ]
@@ -67,10 +67,10 @@ pytestmark = [
 @pytest.fixture(scope="module")
 def reference():
     """Python's own routes for the sample pairs, with full arc sequences."""
-    from sf_flat_routes.config import ROUTING_PROFILES
-    from sf_flat_routes.pipeline import build_context
-    from sf_flat_routes.routing import route
-    from sf_flat_routes.utils import configure_gdal_for_proxy
+    from zrh_flat_routes.config import ROUTING_PROFILES
+    from zrh_flat_routes.pipeline import build_context
+    from zrh_flat_routes.routing import route
+    from zrh_flat_routes.utils import configure_gdal_for_proxy
 
     configure_gdal_for_proxy()
     ctx = build_context()

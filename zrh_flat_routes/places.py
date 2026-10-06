@@ -6,7 +6,7 @@ built here and shipped with the page.
 Three sources, all already in hand or fetched the same way as the streets:
 
 * **Street intersections** are derived in the browser from the graph itself
-  ("24th St & Mission St"); nothing to pack.
+  ("Langstrasse & Josefstrasse"); nothing to pack.
 * **Mapped features** come from Overture's base theme, which is OpenStreetMap
   data: parks, playgrounds, schools, hospitals, plazas, stations, piers,
   bridges, viewpoints, peaks and beaches, each placed on its mapped outline.
@@ -16,12 +16,15 @@ Three sources, all already in hand or fetched the same way as the streets:
   name recurs at several spots, some of them nowhere near the real thing --
   so a record is kept only where nearby records corroborate it, and it is
   dropped when a mapped feature already carries its name.
-* **Addresses** come from Overture's addresses theme (OpenAddresses data for
-  San Francisco), deduplicated to one point per street number.
+* **Addresses** come from swisstopo's official directory of building
+  addresses (Amtliches Verzeichnis der Gebäudeadressen, open government
+  data), deduplicated to one point per street number. Overture also carries
+  Swiss addresses, but labels their licence only as proprietary, so the
+  official register is used instead.
 
-The hillshade base is rendered from the same lidar DEM the analysis uses and
-reprojected to WGS84 so it overlays correctly, then palette-quantised: it is
-a quiet grey image and does not need 24-bit colour.
+The hillshade base is rendered from the same swissALTI3D DEM the analysis
+uses and reprojected to WGS84 so it overlays correctly, then
+palette-quantised: it is a quiet grey image and does not need 24-bit colour.
 """
 from __future__ import annotations
 
@@ -32,13 +35,19 @@ import re
 import numpy as np
 import pandas as pd
 
-from .config import PROCESSED_DIR, SF_BBOX
-from .download import ADDRESSES_PARQUET, BASE_PARQUETS, PLACES_PARQUET
+from .config import PROCESSED_DIR, STUDY_BBOX
+from .download import ADDRESSES_CSV, BASE_PARQUETS, PLACES_PARQUET
 from .utils import get_logger, step
 
-log = get_logger("sf_flat_routes.places")
+log = get_logger("zrh_flat_routes.places")
 
 HILLSHADE_PNG = PROCESSED_DIR / "hillshade_light.png"
+#: Elevation (m) at which the hillshade tint starts, and the rise over which
+#: it reaches full strength (upstream used sea level and 260 m for SF).
+HILLSHADE_BASE_M = 392.0
+HILLSHADE_SPAN_M = 300.0
+#: Colour of the lake and rivers on the hillshade.
+WATER_RGB = (214, 226, 234)
 
 #: Overture primary categories kept, grouped for display. Anything not listed
 #: is dropped unless it is a landmark-like category matched by _KEEP_RE.
@@ -127,10 +136,11 @@ def _support(names: pd.Series, lon: np.ndarray, lat: np.ndarray,
              radius_m: float = 300.0) -> np.ndarray:
     """How many nearby records mention each name.
 
-    'Dolores Park' at the real park is surrounded by 'Dolores Park Cafe',
-    'Dolores Park Tennis Courts' and so on; a stray 'Dolores Park' dropped in
-    the Tenderloin has none of that. The feed carries several such strays
-    with full confidence, so the name alone cannot pick the right one.
+    A real landmark is surrounded by records that borrow its name (upstream's
+    example: 'Dolores Park' amid 'Dolores Park Cafe', 'Dolores Park Tennis
+    Courts'...); a stray copy of the name dropped elsewhere has none of that.
+    The feed carries such strays with full confidence, so the name alone
+    cannot pick the right one.
     """
     cell = radius_m / 111000.0
     grid: dict[tuple[int, int], list[int]] = {}
@@ -150,22 +160,24 @@ def _support(names: pd.Series, lon: np.ndarray, lat: np.ndarray,
     return out
 
 
-_CITY_SUFFIXES = {"sf", "san francisco", "san francisco ca", "sf ca", "ca",
-                  "san francisco california", "california", "usa"}
-# 'X San Francisco' and 'X SF' are city suffixes even without a comma;
-# a bare trailing 'California' or 'CA' only after one ('Cafe California').
+_CITY_SUFFIXES = {"zürich", "zurich", "zuerich", "zh", "zürich zh", "zurich zh",
+                  "zürich ch", "zurich ch", "zürich schweiz", "zurich switzerland",
+                  "schweiz", "switzerland", "ch"}
+# 'X Zürich' and 'X Zurich' are city suffixes even without a comma ('Kunsthaus
+# Zürich' is the Kunsthaus); a bare trailing 'ZH', 'CH' or 'Schweiz' only
+# after one.
 _CORE_RE = re.compile(
-    r"(?:[\s,\-/]+(?:san francisco|sf)(?:[\s,]+(?:ca|california|usa))?"
-    r"|[,\-/]\s*(?:ca|california|usa))\s*$", re.I)
+    r"(?:[\s,\-/]+(?:zürich|zurich|zuerich)(?:[\s,]+(?:zh|ch|schweiz|switzerland))?"
+    r"|[,\-/]\s*(?:zh|ch|schweiz|switzerland))\s*$", re.I)
 
 
 def _core(name: str) -> str:
-    """'Dolores Park, San Francisco' -> 'dolores park'."""
+    """'Kunsthaus Zürich' -> 'kunsthaus'."""
     return _CORE_RE.sub("", str(name)).strip().lower()
 
 
 def _prune_variants(df: pd.DataFrame, radius_m: float = 500.0) -> pd.DataFrame:
-    """Drop 'Dolores Park, San Francisco' when 'Dolores Park' is 200 m away.
+    """Drop 'Lindenhof, Zürich' when 'Lindenhof' is 200 m away.
 
     The places feed carries many user-typed variants of the same name. A
     record is dropped when a better-supported kept name is a prefix of it
@@ -188,9 +200,9 @@ def _prune_variants(df: pd.DataFrame, radius_m: float = 500.0) -> pd.DataFrame:
             # (a branch, a sub-area) only when it is close by
             rest = n[len(k):].strip(" ,-/()").lower()
             if rest in _CITY_SUFFIXES:
-                r = 6000.0                       # 'X, San Francisco' anywhere
+                r = 6000.0                       # 'X, Zürich' anywhere
             elif groups[i] != groups[j]:
-                continue                         # 'Dolores Park Cafe' is a cafe
+                continue                         # 'Lindenhof Cafe' is a cafe
             elif support[j] >= 3 and support[i] == 0:
                 r = 6000.0                       # a same-kind variant of a well-known name
             else:
@@ -255,19 +267,20 @@ def build_places() -> dict:
     support = _support(names.fillna(""), lon, lat, names.fillna(""), lon, lat)
     keep = names.notna() & (names.str.len() >= 3) & group.notna() & (conf >= 0.6)
     # a famous place with no useful category still deserves a slot, and so
-    # does anything the records around it keep mentioning (the Ferry
-    # Building is filed under farming services, after its market)
+    # does anything the records around it keep mentioning (upstream's
+    # example: San Francisco's Ferry Building is filed under farming
+    # services, after its market)
     keep |= names.notna() & cats.isna() & (conf >= 0.9)
     keep |= names.notna() & (support >= 5) & (conf >= 0.6)
     df = pd.DataFrame({"name": names, "group": group.fillna("landmark"),
                        "conf": conf, "lon": lon, "lat": lat, "support": support})[keep]
-    df = df[(df["lon"].between(SF_BBOX[0], SF_BBOX[1]))
-            & (df["lat"].between(SF_BBOX[2], SF_BBOX[3]))]
+    df = df[(df["lon"].between(STUDY_BBOX[0], STUDY_BBOX[1]))
+            & (df["lat"].between(STUDY_BBOX[2], STUDY_BBOX[3]))]
     df = (df.sort_values(["support", "conf"], ascending=False)
             .drop_duplicates(["name", "group"])
             .reset_index(drop=True))
     # the mapped feature wins over any POI record of the same name, or of a
-    # trailing part of it ('Dolores Park' for 'Mission Dolores Park')
+    # trailing part of it ('Rieterpark' for 'Museum Rietberg Rieterpark')
     mapped = set(_core(n) for n in base["name"])
     tails = set()
     for n in mapped:
@@ -278,15 +291,15 @@ def build_places() -> dict:
                 tails.add(tail)
     def superseded(n: str) -> bool:
         c = _core(n)
-        head = re.split(r"\s*[,\-/(]\s*", c, maxsplit=1)[0]   # 'Ferry Building, Embarcadero'
+        head = re.split(r"\s*[,\-/(]\s*", c, maxsplit=1)[0]   # 'Landesmuseum, Platzspitz'
         return c in mapped or c in tails or head in mapped or head in tails
     dup = df["name"].map(superseded)
     log.info("places: %d records superseded by mapped features", int(dup.sum()))
     df = _prune_variants(df[~dup].reset_index(drop=True))
     df = pd.concat([base[["name", "group", "lon", "lat"]], df[["name", "group", "lon", "lat"]]],
                    ignore_index=True)
-    df = df[(df["lon"].between(SF_BBOX[0], SF_BBOX[1]))
-            & (df["lat"].between(SF_BBOX[2], SF_BBOX[3]))]
+    df = df[(df["lon"].between(STUDY_BBOX[0], STUDY_BBOX[1]))
+            & (df["lat"].between(STUDY_BBOX[2], STUDY_BBOX[3]))]
     df = df.sort_values(["name"]).reset_index(drop=True)
     log.info("places: %d kept of %d POI records plus %d mapped features (%s)",
              len(df) - len(base), len(t), len(base),
@@ -301,24 +314,55 @@ def build_places() -> dict:
     }
 
 
+def _address_columns(header: list[str]) -> dict:
+    """Locate the street, number and LV95 coordinate columns of the register."""
+    up = {c.upper(): c for c in header}
+
+    def pick(*cands):
+        return next((up[c] for c in cands if c in up), None)
+    cols = {"street": pick("STN_LABEL", "STRNAME", "STREET"),
+            "number": pick("ADR_NUMBER", "DEINR", "NUMBER"),
+            "e": pick("ADR_EASTING", "GKODE", "DKODE", "EASTING"),
+            "n": pick("ADR_NORTHING", "GKODN", "DKODN", "NORTHING"),
+            "status": pick("ADR_STATUS", "STATUS")}
+    missing = [k for k, v in cols.items() if v is None and k != "status"]
+    if missing:
+        raise KeyError(f"address register lacks {missing}: {header}")
+    return cols
+
+
 def build_addresses() -> dict:
-    """One point per (street, number), with a street table."""
-    import pyarrow.parquet as pq
-    import shapely
-    t = pq.read_table(ADDRESSES_PARQUET, columns=["number", "street", "geometry"]).to_pandas()
-    t = t[t["street"].notna() & t["number"].notna()]
-    num = pd.to_numeric(t["number"].astype(str).str.extract(r"^(\d+)")[0], errors="coerce")
+    """One point per (street, number), with a street table.
+
+    Swiss house numbers carry letters and sub-numbers ('12a', '4.1'); the
+    index keeps the leading integer, which is what anyone types first, and
+    the point of the lowest-suffixed entrance under it.
+    """
+    from pyproj import Transformer
+
+    t = pd.read_csv(ADDRESSES_CSV, sep=None, engine="python", dtype=str)
+    c = _address_columns(list(t.columns))
+    if c["status"]:
+        # planned and withdrawn addresses are not places anyone is going
+        t = t[~t[c["status"]].fillna("").str.lower().isin({"planned", "outdated",
+                                                           "geplant", "aufgehoben"})]
+    t = t[t[c["street"]].notna() & t[c["number"]].notna()].copy()
+    num = pd.to_numeric(t[c["number"]].str.extract(r"^(\d+)")[0], errors="coerce")
     ok = num.notna() & (num < 65536)
     t = t[ok].copy(); t["num"] = num[ok].astype(int)
-    geom = shapely.from_wkb(t["geometry"].values)
-    t["lon"] = [g.x for g in geom]; t["lat"] = [g.y for g in geom]
-    t["street_t"] = t["street"].map(_title_street)
-    t = (t.sort_values(["street_t", "num"])
+    tr = Transformer.from_crs("EPSG:2056", "EPSG:4326", always_xy=True)
+    lon, lat = tr.transform(pd.to_numeric(t[c["e"]]).to_numpy(),
+                            pd.to_numeric(t[c["n"]]).to_numpy())
+    t["lon"], t["lat"] = lon, lat
+    t = t[t["lon"].between(STUDY_BBOX[0], STUDY_BBOX[1])
+          & t["lat"].between(STUDY_BBOX[2], STUDY_BBOX[3])]
+    t["street_t"] = t[c["street"]].str.strip()
+    t = (t.sort_values(["street_t", "num", c["number"]])
            .drop_duplicates(["street_t", "num"]).reset_index(drop=True))
     streets = sorted(t["street_t"].unique())
     sidx = {s: i for i, s in enumerate(streets)}
     log.info("addresses: %d unique street numbers on %d streets", len(t), len(streets))
-    lon0, lat0 = SF_BBOX[0], SF_BBOX[2]
+    lon0, lat0 = STUDY_BBOX[0], STUDY_BBOX[2]
     return {
         "streets": streets,
         "street": t["street_t"].map(sidx).to_numpy().astype("<u2"),
@@ -355,15 +399,27 @@ def build_hillshade(width_px: int = 1600) -> dict:
         dem = np.where(np.isfinite(dem) & (dem != nod) & (dem > -50), dem, np.nan)
         valid = np.isfinite(dem)
         filled = np.where(valid, dem, np.nanmedian(dem))
-        px_m = abs(transform.a) * 111320 * np.cos(np.radians(37.76))
+        mid_lat = (STUDY_BBOX[2] + STUDY_BBOX[3]) / 2
+        px_m = abs(transform.a) * 111320 * np.cos(np.radians(mid_lat))
         hs = hillshade(filled, res=px_m, z_factor=1.8)
         shade = (0.72 + 0.28 * hs)[..., None]
-        tint = np.clip(filled / 260, 0, 1)[..., None]
+        # tint by height above the Limmat (about 392 m where it leaves the
+        # city) up to the Zürichberg's crest; the Uetliberg saturates
+        tint = np.clip((filled - HILLSHADE_BASE_M) / HILLSHADE_SPAN_M, 0, 1)[..., None]
         base = np.array([243, 242, 238], float); dark = np.array([196, 194, 186], float)
         rgb = (base * (1 - tint * 0.45) + dark * (tint * 0.45)) * shade
         img = np.zeros((h2, w2, 4), np.uint8)
         img[..., :3] = np.clip(rgb, 0, 255).astype(np.uint8)
         img[..., 3] = np.where(valid, 255, 0)
+        # the lake and rivers: swissALTI3D carries them as flat ground
+        from .viz_static import water_geometry
+        water = water_geometry("EPSG:4326")
+        if water is not None:
+            from rasterio.features import rasterize
+            wet = rasterize([water], out_shape=(h2, w2), transform=transform,
+                            fill=0, default_value=1, dtype="uint8").astype(bool)
+            img[wet, :3] = WATER_RGB
+            img[wet, 3] = 255
         im = Image.fromarray(img, "RGBA").quantize(colors=96, method=Image.Quantize.FASTOCTREE)
         buf = io.BytesIO(); im.save(buf, "PNG", optimize=True)
         im.save(HILLSHADE_PNG)

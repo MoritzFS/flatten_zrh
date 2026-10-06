@@ -7,13 +7,13 @@ question is whether the headline moves when those change.  This harness
 answers it by rebuilding the whole pipeline under a one-at-a-time grid around
 the baseline and tabulating what comes out.
 
-Each configuration runs in its own subprocess with ``SFFR_RUN_DIR`` and
-``SFFR_OVERRIDES`` set, so the main results are never touched, and the
+Each configuration runs in its own subprocess with ``ZFR_RUN_DIR`` and
+``ZFR_OVERRIDES`` set, so the main results are never touched, and the
 baseline DEM mosaic is reused by symlink because it does not depend on any of
 the parameters.  Runs are cached: a configuration whose summary already
 exists is not rebuilt.
 
-    python -m sf_flat_routes sensitivity            # ~30 min on 4 cores
+    python -m zrh_flat_routes sensitivity            # ~30 min on 4 cores
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ import pandas as pd
 from .config import ANALYSIS, DATA_DIR, ELEVATION, OUTPUT_DIR, PROJECT_ROOT
 from .utils import get_logger, step
 
-log = get_logger("sf_flat_routes.sensitivity")
+log = get_logger("zrh_flat_routes.sensitivity")
 
 RUNS_DIR = DATA_DIR / "sensitivity"
 SENS_CSV = OUTPUT_DIR / "sensitivity.csv"
@@ -163,15 +163,15 @@ def _run(tag: str, overrides: dict, force: bool = False) -> dict:
         link.symlink_to(base_mosaic)
 
     env = dict(os.environ)
-    env["SFFR_RUN_DIR"] = str(run_dir)
-    env["SFFR_OVERRIDES"] = json.dumps(overrides)
+    env["ZFR_RUN_DIR"] = str(run_dir)
+    env["ZFR_OVERRIDES"] = json.dumps(overrides)
     env["PYTHONPATH"] = str(PROJECT_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
     log_path = run_dir / "run.log"
     t0 = time.time()
     with open(log_path, "w") as fh:
         for cmd in (["build-network", "--force"], ["analyze", "--force"],
                     ["summarize", "--tag", tag]):
-            rc = subprocess.call([sys.executable, "-m", "sf_flat_routes", *cmd],
+            rc = subprocess.call([sys.executable, "-m", "zrh_flat_routes", *cmd],
                                  env=env, stdout=fh, stderr=subprocess.STDOUT,
                                  cwd=str(PROJECT_ROOT))
             if rc:

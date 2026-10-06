@@ -7,9 +7,9 @@ by connector ID yields exact topology with no geometric snapping tolerance,
 and grade-separated crossings correctly stay unconnected.
 
 Access is derived from Overture ``access_restrictions``.  The rule shapes
-actually present in San Francisco are:
+upstream found in San Francisco, and which occur in Zurich too, are:
 
-* ``denied`` + ``heading=backward`` (7,034 segments) -- one-way streets.
+* ``denied`` + ``heading=backward`` -- one-way streets.
   Enforced for bicycles, ignored for pedestrians, since OSM ``oneway``
   describes vehicle movement.
 * ``denied``/``allowed``/``designated`` + ``mode=[foot|bicycle|...]`` --
@@ -18,12 +18,12 @@ actually present in San Francisco are:
   private or destination-only access; excluded from through routing.
 
 A rule that names a mode outranks a rule that applies to every mode,
-whatever order they appear in.  San Francisco's Slow Streets (Page,
-Shotwell, Cabrillo, 12th Avenue) arrive as "foot allowed, bicycle
-designated, motor vehicles at destination only, everything at destination
-only", in that order; reading them in document order let the final
-all-modes rule close the street to walking, which is the opposite of what a
-Slow Street is.
+whatever order they appear in.  Upstream found this on San Francisco's Slow
+Streets, which arrive as "foot allowed, bicycle designated, motor vehicles
+at destination only, everything at destination only", in that order;
+reading them in document order let the final all-modes rule close the
+street to walking.  Zurich's many one-way streets open to contraflow
+cycling ("ausgenommen Velo") depend on the same ordering.
 """
 from __future__ import annotations
 
@@ -32,12 +32,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .config import (BIKE_FORBIDDEN_CLASSES, CRS_GEOGRAPHIC, CRS_PROJECTED,
+from .config import (BIKE_FORBIDDEN_CLASSES, BIKE_PERMIT_REQUIRED_CLASSES,
+                     CRS_GEOGRAPHIC, CRS_PROJECTED,
                      MODES, NEVER_ROUTABLE_CLASSES, NEVER_ROUTABLE_SUBCLASSES,
                      PROCESSED_DIR)
 from .utils import get_logger, progress, step
 
-log = get_logger("sf_flat_routes.network")
+log = get_logger("zrh_flat_routes.network")
 
 EDGES_PARQUET = PROCESSED_DIR / "edges_raw.parquet"
 
@@ -249,11 +250,11 @@ def build_edges(segments_path: Path, force: bool = False,
                 clip_to_city: bool = True) -> "pd.DataFrame":
     """Produce the undirected edge table with geometry, class and access.
 
-    The Overture extract covers a bounding box, which also catches the Marin
-    headlands (reachable only across the Golden Gate Bridge and partly
-    outside the lidar footprint) and northern San Mateo County.  Clipping to
-    the union of the San Francisco neighborhood polygons keeps the analysis
-    to the city, which is what the corridor and pass analysis is about.
+    The Overture extract covers a bounding box, which also catches the
+    neighbouring municipalities (Schlieren, Opfikon, Dübendorf, Zollikon,
+    Kilchberg, Adliswil...).  Clipping to the union of the City of Zurich's
+    statistical quarters, plus 250 m, keeps the analysis to the city, which
+    is what the corridor and pass analysis is about.
     """
     import geopandas as gpd
 
@@ -262,6 +263,7 @@ def build_edges(segments_path: Path, force: bool = False,
         return gpd.read_parquet(EDGES_PARQUET)
 
     df = load_segments(segments_path)
+    sidewalks = _sidewalk_geometries(df)
     with step("filtering segments", log):
         df = _base_filter(df)
     with step("splitting segments at connectors", log):
@@ -275,7 +277,7 @@ def build_edges(segments_path: Path, force: bool = False,
 
     if clip_to_city:
         from .neighborhoods import city_boundary
-        with step("clipping network to the San Francisco city boundary", log):
+        with step("clipping network to the Zurich city boundary", log):
             boundary = city_boundary(buffer_m=250.0)
             mid = gdf.geometry.interpolate(0.5, normalized=True)
             keep = gpd.GeoSeries(mid, crs=gdf.crs).within(boundary)
@@ -288,11 +290,26 @@ def build_edges(segments_path: Path, force: bool = False,
     gdf["is_tunnel"] = gdf["flags"].apply(lambda f: "is_tunnel" in f)
     gdf["is_structure"] = gdf["is_bridge"] | gdf["is_tunnel"]
 
+    walk_sidepath = _beside_sidewalk(gdf, sidewalks)
+
     # per-mode access
     with step("evaluating per-mode access restrictions", log):
         for mode_name, mode in MODES.items():
-            res = [evaluate_access(r, mode.access_modes[0]) for r in gdf["access_restrictions"]]
+            # a missing rule means "allowed", except for bicycles on the
+            # classes Swiss law closes to them by default
+            default = (~gdf["cls"].isin(BIKE_PERMIT_REQUIRED_CLASSES) if mode_name == "bike"
+                       else pd.Series(True, index=gdf.index))
+            res = [evaluate_access(r, mode.access_modes[0], default=bool(d))
+                   for r, d in zip(gdf["access_restrictions"], default)]
             gdf[f"{mode_name}_allowed"] = [r["allowed"] for r in res]
+            if mode_name == "walk":
+                # the walker is on the mapped sidewalk, which the centreline
+                # stands in for (see _beside_sidewalk)
+                lifted = walk_sidepath & ~gdf["walk_allowed"]
+                gdf["walk_allowed"] |= walk_sidepath
+                gdf["walk_sidepath"] = lifted
+                log.info("  walk: %d centreline edges closed to walking but "
+                         "lined by a mapped sidewalk are opened", int(lifted.sum()))
             gdf[f"{mode_name}_oneway"] = [r["oneway_forward_only"] for r in res]
             gdf[f"{mode_name}_restricted"] = [r["restricted"] for r in res]
             # class eligibility
@@ -303,7 +320,7 @@ def build_edges(segments_path: Path, force: bool = False,
             log.info("  %s: %d of %d edges routable", mode_name,
                      int(gdf[f"{mode_name}_ok"].sum()), len(gdf))
 
-    # bicycle infrastructure / low-stress proxy (SFMTA data unavailable)
+    # bicycle infrastructure / low-stress proxy, from Overture/OSM classes
     gdf["bike_facility"] = np.where(
         gdf["cls"] == "cycleway", "dedicated_cycleway",
         np.where(gdf["cls"].isin(["path", "footway"]) & gdf["bike_allowed"],
@@ -316,13 +333,78 @@ def build_edges(segments_path: Path, force: bool = False,
     gdf["edge_id"] = np.arange(len(gdf), dtype=np.int64)
     keep = ["edge_id", "segment_id", "u", "v", "part", "cls", "subclass", "name",
             "length_m", "is_bridge", "is_tunnel", "is_structure",
-            "walk_ok", "walk_oneway", "walk_restricted",
+            "walk_ok", "walk_oneway", "walk_restricted", "walk_sidepath",
             "bike_ok", "bike_oneway", "bike_restricted",
             "bike_facility", "low_stress", "geometry"]
     gdf = gdf[keep]
     gdf.to_parquet(EDGES_PARQUET)
     log.info("wrote %s (%d edges)", EDGES_PARQUET.name, len(gdf))
     return gdf
+
+
+# --------------------------------------------------------------------------
+# separately mapped sidewalks
+# --------------------------------------------------------------------------
+#: A street centreline counts as walkable, whatever its own access rules say,
+#: when at least this share of it lies within SIDEWALK_BUFFER_M of a mapped
+#: sidewalk.
+SIDEWALK_SHARE = 0.5
+SIDEWALK_BUFFER_M = 15.0
+
+
+def _sidewalk_geometries(df: pd.DataFrame):
+    """Projected geometries of every segment mapped as a sidewalk."""
+    import geopandas as gpd
+    import shapely
+
+    sub = df[(df["subtype"] == "road") & (df["subclass"] == "sidewalk")]
+    geoms = shapely.from_wkb(sub["geometry"].values)
+    return gpd.GeoSeries(geoms, crs=CRS_GEOGRAPHIC).to_crs(CRS_PROJECTED)
+
+
+def _beside_sidewalk(gdf, sidewalks) -> pd.Series:
+    """Which edges run alongside a separately mapped sidewalk.
+
+    The model walks on street centrelines and leaves the sidewalk network
+    out (it would represent every street two or three times).  Upstream that
+    loses little, but Zurich's mappers draw the sidewalks of most main roads
+    as their own ways and then mark the carriageway itself closed to
+    pedestrians ("use the sidewalk"): Rosengartenstrasse, the Bucheggplatz
+    roundabout and parts of Schaffhauserstrasse arrive as ``foot denied``.
+    Read literally, that makes the lowest crossing between the Limmat and
+    Glatt valleys unwalkable.  A centreline lined by sidewalk stands in for
+    that sidewalk, so it stays open on foot; a road with no sidewalk beside
+    it -- a motor-road tunnel, an Autostrasse -- stays closed.
+    """
+    import shapely
+
+    out = pd.Series(False, index=gdf.index)
+    if sidewalks is None or len(sidewalks) == 0:
+        return out
+    cand = gdf["cls"].isin(["trunk", "primary", "secondary", "tertiary",
+                            "unclassified", "residential", "living_street",
+                            "service", "pedestrian", "unknown"]) & ~gdf["flags"].apply(
+        lambda f: "is_tunnel" in f)
+    if not cand.any():
+        return out
+    with step("matching street centrelines to mapped sidewalks", log):
+        # sample each candidate every 5 m and ask a spatial index whether a
+        # sidewalk lies within SIDEWALK_BUFFER_M of the sample
+        geoms = gdf.loc[cand, "geometry"].to_numpy()
+        lengths = shapely.length(geoms)
+        counts = np.maximum(2, (lengths // 5.0).astype(int) + 1)
+        owner = np.repeat(np.arange(len(geoms)), counts)
+        frac = np.concatenate([np.linspace(0.0, 1.0, k) for k in counts])
+        pts = shapely.line_interpolate_point(geoms[owner], frac, normalized=True)
+        tree = shapely.STRtree(sidewalks.to_numpy())
+        hit = tree.query(pts, predicate="dwithin", distance=SIDEWALK_BUFFER_M)[0]
+        near = np.zeros(len(pts), dtype=float)
+        near[np.unique(hit)] = 1.0
+        share = np.bincount(owner, weights=near) / counts
+        out.loc[cand] = share >= SIDEWALK_SHARE
+    log.info("  %d of %d street edges run beside a mapped sidewalk",
+             int(out.sum()), int(cand.sum()))
+    return out
 
 
 # --------------------------------------------------------------------------

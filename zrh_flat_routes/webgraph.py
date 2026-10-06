@@ -45,7 +45,7 @@ import pandas as pd
 from .config import GRADE_THRESHOLDS, MODES, ROUTING_PROFILES
 from .utils import get_logger, step
 
-log = get_logger("sf_flat_routes.webgraph")
+log = get_logger("zrh_flat_routes.webgraph")
 
 _TH = [int(t * 100) for t in GRADE_THRESHOLDS]
 

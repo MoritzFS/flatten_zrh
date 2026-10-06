@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Flatten SF explorer</title>
+<title>Flatten Zürich explorer</title>
 <style>/*__LEAFLET_CSS__*/</style>
 <style>/*__APP_CSS__*/</style>
 </head>
@@ -11,10 +11,12 @@
 <div id="app">
   <div id="side">
     <div class="pad">
-      <h1>Flatten SF <small>explorer</small></h1>
+      <h1>Flatten Zürich <small>explorer</small></h1>
       <p class="sub">The city's low-elevation street network, modelled from
-      USGS 3DEP 1&nbsp;m lidar and the Overture&nbsp;/&nbsp;OpenStreetMap
-      street graph. Routing runs in your browser over the real graph.</p>
+      swisstopo's swissALTI3D terrain model and the Overture&nbsp;/&nbsp;OpenStreetMap
+      street graph. Routing runs in your browser over the real graph. A
+      Zürich port of <a href="https://github.com/almostimplemented/flattensf">Flatten SF</a>
+      by Drew Edwards.</p>
 
       <h2>Plan a route</h2>
       <label>Travel mode</label>
@@ -30,7 +32,7 @@
         <button data-pick="dst" aria-pressed="false">Destination</button>
       </div>
 
-      <label for="o">Or choose a neighborhood &mdash; origin</label>
+      <label for="o">Or choose a quarter &mdash; origin</label>
       <select id="o"></select>
       <label for="d">Destination</label>
       <select id="d"></select>
@@ -65,7 +67,7 @@
       <button class="act" id="resetw">Reset to the selected preset</button>
 
       <h2>The warped city</h2>
-      <p class="note">Redraw San Francisco so that distance on the page is
+      <p class="note">Redraw Zürich so that distance on the page is
       <em>climbing cost</em> instead of geography. Places separated by a
       ridge move apart; places joined by a flat corridor pull together.</p>
       <button class="act" id="warptoggle" aria-pressed="false">Show the warped city</button>
@@ -82,7 +84,7 @@
       </div>
       <div id="warpstate" hidden>
         <div class="note" id="warpinfo"></div>
-        <div class="note">Street vertices, neighborhood outlines, corridors
+        <div class="note">Street vertices, quarter outlines, corridors
         and your route are all carried by the same deformation, so the route
         you see is the route you would walk.</div>
       </div>

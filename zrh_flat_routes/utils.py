@@ -34,7 +34,7 @@ def get_logger(name: str) -> logging.Logger:
 @contextmanager
 def step(message: str, logger: logging.Logger | None = None) -> Iterator[None]:
     """Log the start and wall-clock duration of an expensive stage."""
-    log = logger or logging.getLogger("sf_flat_routes")
+    log = logger or logging.getLogger("zrh_flat_routes")
     log.info("%s ...", message)
     t0 = time.perf_counter()
     try:
@@ -50,7 +50,7 @@ def progress(iterable: Iterable[T], desc: str = "", total: int | None = None,
         from tqdm.auto import tqdm
     except ImportError:  # pragma: no cover
         return iterable
-    disable = not sys.stderr.isatty() and not os.environ.get("SFFR_FORCE_PROGRESS")
+    disable = not sys.stderr.isatty() and not os.environ.get("ZFR_FORCE_PROGRESS")
     return tqdm(iterable, desc=desc, total=total, unit=unit,
                 disable=disable, mininterval=2.0, dynamic_ncols=True)
 

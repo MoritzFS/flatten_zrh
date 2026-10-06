@@ -1,4 +1,5 @@
-/* San Francisco flat routes -- the explorer page (everything on screen).
+/* Zurich flat routes -- the explorer page (everything on screen).
+ * Ported from flattensf by Drew Edwards (MIT licence).
  * Depends on engine.js. */
 "use strict";
 
@@ -105,7 +106,6 @@ const NetworkLayer = L.Layer.extend({
 });
 
 /* ------------------------------------------------------------- formatting */
-const MI = 1609.344, FT = 3.28084;
 function fmt(v, how) {
   if (v === null || v === undefined || v === "" || Number.isNaN(v)) return "—";
   switch (how) {
@@ -113,7 +113,6 @@ function fmt(v, how) {
     case "m0": return Math.round(v).toLocaleString() + " m";
     case "m1": return (+v).toFixed(1) + " m";
     case "km": return (+v).toFixed(2) + " km";
-    case "ft": return Math.round(v).toLocaleString() + " ft";
     case "int": return (+v).toLocaleString();
     case "km2": return (+v).toFixed(2) + " km²";
     case "bool": return v ? "yes" : "no";
@@ -162,7 +161,7 @@ const App = {
   /* ---------------------------------------------------------------- map */
   buildMap() {
     const map = L.map("map", {
-      preferCanvas: true, center: [37.762, -122.437], zoom: 12,
+      preferCanvas: true, center: [47.377, 8.535], zoom: 12,
       minZoom: 10, maxZoom: 18, zoomControl: true,
     });
     this._fitCity = () => {
@@ -172,13 +171,14 @@ const App = {
       map.fitBounds(b, { padding: [14, 14] });
     };
     this.map = map;
-    L.control.scale({ imperial: true, metric: true }).addTo(map);
+    L.control.scale({ imperial: false, metric: true }).addTo(map);
     if (this.DATA.basemap !== false) this.tiles = L.tileLayer(
       "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png", {
       subdomains: "abc", maxZoom: 19, opacity: 0.5, crossOrigin: true,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         + ' contributors, &copy; <a href="https://carto.com/attributions">CARTO</a>'
-        + ' &middot; elevation USGS 3DEP &middot; streets Overture Maps',
+        + ' &middot; elevation &copy; swisstopo (swissALTI3D) &middot; streets Overture Maps'
+        + ' &middot; quarters Stadt Z&uuml;rich',
     }).addTo(map);
 
     this.overlays = {};
@@ -186,9 +186,9 @@ const App = {
     this.overlays.network = this.network;
 
     const defs = [
-      ["neighborhoods", "Neighborhood boundaries", true,
+      ["neighborhoods", "Statistical quarters", true,
         () => ({ color: "#8492a0", weight: 1.1, opacity: 0.8, fill: false, dashArray: "4,3" })],
-      ["basins", "Lowland basins (street below 15 m)", false,
+      ["basins", "Lowland basins (street below /*__BASIN_ELEV__*/ m)", false,
         () => ({ color: "#3f9b6d", weight: 1.2, opacity: 0.55 })],
       ["bike_network", "Bicycle facilities (OSM-derived)", false,
         () => ({ color: "#39d98a", weight: 2.0, opacity: 0.9 })],
@@ -258,17 +258,17 @@ const App = {
       corridors: [["corridor_name", "Corridor"], ["mode", "Mode"],
         ["length_km", "Length", "km"], ["mean_abs_grade", "Mean gradient", "pct"],
         ["max_grade", "Max gradient", "pct"], ["gain_per_km", "Climb per km", "m1"],
-        ["pair_count_max", "Neighborhood pairs served", "int"],
-        ["neighborhood_span", "Neighborhoods spanned", "int"],
+        ["pair_count_max", "Quarter pairs served", "int"],
+        ["neighborhood_span", "Quarters spanned", "int"],
         ["climb_saved_m", "Climbing avoided (total)", "m0"],
         ["elev_min_m", "Lowest point", "m0"], ["elev_max_m", "Highest point", "m0"],
         ["neighborhoods", "Passes through"], ["street_names", "Streets"]],
-      passes: [["name", "Street"], ["neighborhood", "Neighborhood"],
-        ["pass_elev_ft", "Lowest possible crossing", "ft"],
-        ["pairs_served", "Neighborhood pairs forced over it", "int"],
+      passes: [["name", "Street"], ["neighborhood", "Quarter"],
+        ["pass_elev_m", "Lowest possible crossing", "m0"],
+        ["pairs_served", "Quarter pairs forced over it", "int"],
         ["max_abs_grade", "Max gradient", "pct"],
         ["neighborhoods_separated", "Separates"]],
-      barriers: [["name", "Street"], ["neighborhood", "Neighborhood"],
+      barriers: [["name", "Street"], ["neighborhood", "Quarter"],
         ["max_abs_grade", "Max gradient", "pct"], ["length_m", "Length", "m0"],
         ["shortest_use", "Pairs via shortest route", "int"],
         ["flat_use_per_objective", "... still via the flat route", "int"],
@@ -278,8 +278,8 @@ const App = {
         ["length_m", "Length", "m0"]],
       low_stress: [["name", "Street"], ["cls", "Class"],
         ["bike_facility", "Facility"], ["length_m", "Length", "m0"]],
-      neighborhoods: [["neighborhood", "Neighborhood"], ["area_km2", "Area", "km2"]],
-      basins: [["basin_label", "Lowland basin"], ["length_km", "Street below 15 m", "km"]],
+      neighborhoods: [["neighborhood", "Quarter"], ["district", "District"], ["area_km2", "Area", "km2"]],
+      basins: [["basin_label", "Lowland basin"], ["length_km", "Street below /*__BASIN_ELEV__*/ m", "km"]],
     }[kind] || [];
     let h = "";
     for (const [k, lab, how] of spec) {
@@ -336,8 +336,8 @@ const App = {
       return this.nodeGrid.nearest(p[0], p[1],
         i => (this.graph.nodeFlags[i] & bit) !== 0);
     };
-    this.state.src = pick("Mission");
-    this.state.dst = pick("Outer Sunset");
+    this.state.src = pick("Langstrasse");
+    this.state.dst = pick("Witikon");
   },
 
   weights() {
@@ -354,7 +354,7 @@ const App = {
     const out = document.getElementById("res");
     if (s.src == null || s.dst == null || s.src < 0 || s.dst < 0 || s.src === s.dst) {
       out.innerHTML = '<p class="sub">Click the map to set an origin, then a '
-        + 'destination. Or pick neighborhoods from the menus.</p>';
+        + 'destination. Or pick quarters from the menus.</p>';
       this.routeLine.setLatLngs([]); this.routeHalo.setLatLngs([]);
       this.cmpLine.setLatLngs([]); this.marks.clearLayers();
       this.drawProfile(null);
@@ -386,8 +386,7 @@ const App = {
     const mk = (node, colour, label) => L.circleMarker(
       this.place(this.graph.nodeLat(node), this.graph.nodeLon(node)),
       { radius: 7, color: "#04121a", weight: 2, fillColor: colour, fillOpacity: 1 })
-      .bindPopup(`<b>${label}</b><br>${this.graph.nodeZ(node).toFixed(1)} m `
-        + `(${Math.round(this.graph.nodeZ(node) * FT)} ft)`);
+      .bindPopup(`<b>${label}</b><br>${this.graph.nodeZ(node).toFixed(1)} m above sea level`);
     mk(s.src, "#7fcdbb", "Origin").addTo(this.marks);
     mk(s.dst, "#e3492e", "Destination").addTo(this.marks);
 
@@ -413,15 +412,14 @@ const App = {
   },
 
   renderResult(sum, sh, ms, settled) {
-    const mi = sum.distance_m / MI, ft = sum.elev_gain_m * FT;
-    let h = `<div class="big">${mi.toFixed(2)} mi &middot; `
-      + `${Math.round(ft).toLocaleString()} ft climb</div><table>`;
-    h += `<tr><td class="k">Distance</td><td class="v">${mi.toFixed(2)} mi / `
-      + `${(sum.distance_m / 1000).toFixed(2)} km</td></tr>`;
-    h += `<tr><td class="k">Elevation gain</td><td class="v">${Math.round(ft)} ft / `
+    const km = sum.distance_m / 1000;
+    let h = `<div class="big">${km.toFixed(2)} km &middot; `
+      + `${Math.round(sum.elev_gain_m).toLocaleString()} m climb</div><table>`;
+    h += `<tr><td class="k">Distance</td><td class="v">${km.toFixed(2)} km</td></tr>`;
+    h += `<tr><td class="k">Elevation gain</td><td class="v">`
       + `${sum.elev_gain_m.toFixed(0)} m</td></tr>`;
     h += `<tr><td class="k">Elevation loss</td><td class="v">`
-      + `${Math.round(sum.elev_loss_m * FT)} ft / ${sum.elev_loss_m.toFixed(0)} m</td></tr>`;
+      + `${sum.elev_loss_m.toFixed(0)} m</td></tr>`;
     h += `<tr><td class="k">Steepest climb</td><td class="v">`
       + `${(sum.max_grade * 100).toFixed(1)}%</td></tr>`;
     h += `<tr><td class="k">Mean gradient</td><td class="v">`
@@ -432,18 +430,18 @@ const App = {
     });
     h += "</table>";
     if (sh && sh.distance_m > 0 && (this.state.profile !== "shortest" || this.state.custom)) {
-      const dMi = (sum.distance_m - sh.distance_m) / MI;
-      const dFt = (sh.elev_gain_m - sum.elev_gain_m) * FT;
+      const dKm = (sum.distance_m - sh.distance_m) / 1000;
+      const dM = sh.elev_gain_m - sum.elev_gain_m;
       h += `<div class="cmp">
         <div class="card"><div class="t">Extra distance</div><div class="n">`
-        + `${dMi >= 0 ? "+" : ""}${dMi.toFixed(2)} mi `
+        + `${dKm >= 0 ? "+" : ""}${dKm.toFixed(2)} km `
         + `(${(100 * (sum.distance_m / sh.distance_m - 1)).toFixed(0)}%)</div></div>
         <div class="card"><div class="t">Climbing saved</div>`
-        + `<div class="n ${dFt > 0 ? "good" : "bad"}">`
-        + `${dFt >= 0 ? "" : "+"}${Math.abs(Math.round(dFt))} ft</div></div></div>`;
+        + `<div class="n ${dM > 0 ? "good" : "bad"}">`
+        + `${dM >= 0 ? "" : "+"}${Math.abs(Math.round(dM))} m</div></div></div>`;
       h += `<div class="note">Shortest route, shown dashed: `
-        + `${(sh.distance_m / MI).toFixed(2)} mi with `
-        + `${Math.round(sh.elev_gain_m * FT)} ft of climbing, steepest `
+        + `${(sh.distance_m / 1000).toFixed(2)} km with `
+        + `${Math.round(sh.elev_gain_m)} m of climbing, steepest `
         + `${(sh.max_grade * 100).toFixed(0)}%.</div>`;
     }
     h += `<div class="note">Routed in the browser in ${ms.toFixed(0)} ms `
@@ -485,11 +483,11 @@ const App = {
     ctx.strokeStyle = "#39434e"; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(padL, H - padB); ctx.lineTo(W - padR, H - padB); ctx.stroke();
     ctx.fillStyle = "#93a1af"; ctx.font = "11px sans-serif"; ctx.textAlign = "right";
-    ctx.fillText(Math.round(emax * FT) + " ft", padL - 5, padT + 9);
-    ctx.fillText(Math.round(emin * FT) + " ft", padL - 5, H - padB - 1);
-    ctx.fillText((d[n - 1] / MI).toFixed(2) + " mi", W - padR, H - 9);
+    ctx.fillText(Math.round(emax) + " m", padL - 5, padT + 9);
+    ctx.fillText(Math.round(emin) + " m", padL - 5, H - padB - 1);
+    ctx.fillText((d[n - 1] / 1000).toFixed(2) + " km", W - padR, H - 9);
     ctx.textAlign = "left"; ctx.fillText("0", padL, H - 9);
-    note.textContent = `Elevation ${Math.round(emin * FT)}–${Math.round(emax * FT)} ft, `
+    note.textContent = `Elevation ${Math.round(emin)}–${Math.round(emax)} m, `
       + `sampled at every intersection. Shading shows gradient.`;
   },
 };
@@ -505,7 +503,7 @@ Object.assign(App, {
       oSel.appendChild(new Option(n, n));
       dSel.appendChild(new Option(n, n));
     }
-    oSel.value = "Mission"; dSel.value = "Outer Sunset";
+    oSel.value = "Langstrasse"; dSel.value = "Witikon";
     const setFrom = (sel, which) => {
       const name = sel.value;
       if (!name) return;
@@ -796,7 +794,7 @@ Object.assign(App, {
         onEachFeature: (f, l) => l.bindPopup(this.popupHTML("corridors", f.properties)),
       }).addTo(this.map));
     }
-    // neighborhood names, so the deformation can be read
+    // quarter names, so the deformation can be read
     const pts = this.DATA.points[this.state.mode] || {};
     const labels = L.layerGroup();
     for (const name of Object.keys(pts)) {
@@ -862,7 +860,7 @@ App.start = async function (DATA) {
     prevSync();
     if (this.warpOn) {
       document.getElementById("pickhint").textContent =
-        "Map clicks are off while the city is warped. Choose neighborhoods from the menus.";
+        "Map clicks are off while the city is warped. Choose quarters from the menus.";
     }
   };
 };

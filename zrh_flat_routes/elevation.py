@@ -1,19 +1,22 @@
-"""Elevation sampling from the USGS 3DEP 1 m lidar DEM.
+"""Elevation sampling from swisstopo's swissALTI3D terrain model.
 
 Accuracy of the climbing metrics rests entirely on this module, so the
-method is spelled out here and mirrored in the README.
+method is spelled out here and mirrored in the README. It is upstream's
+(flattensf, built on USGS 3DEP 1 m lidar for San Francisco), applied to the
+2 m swissALTI3D tiles.
 
-1.  **Mosaic.**  The four 1 m 3DEP tiles are merged and clipped to the study
-    area once, in their native EPSG:26910, and cached.  No raster
-    reprojection is ever performed, so no resampling error is introduced.
+1.  **Mosaic.**  The 1 km swissALTI3D tiles are merged and clipped to the
+    study area once, in their native EPSG:2056 (LV95), and cached.  No
+    raster reprojection is ever performed, so no resampling error is
+    introduced.
 
 2.  **Noise suppression (spatial).**  A Gaussian filter of sigma = 3 m is
-    applied to the DEM before sampling.  A bare-earth lidar DEM still
-    contains decimetre-scale artefacts from curbs, parked vehicles,
-    vegetation misclassification and interpolation over occlusions.  A 3 m
-    sigma is far narrower than a San Francisco street (15-25 m kerb to kerb)
-    and far narrower than the ~100 m block scale on which real street grade
-    varies, so block-scale slope is preserved while artefacts are damped.
+    applied to the DEM before sampling.  A bare-earth lidar-derived DEM
+    still contains decimetre-scale artefacts from kerbs, walls, vegetation
+    misclassification and interpolation under removed buildings.  A 3 m
+    sigma is narrower than most Zurich streets and far narrower than the
+    ~100 m block scale on which real street grade varies, so block-scale
+    slope is preserved while artefacts are damped.
     Smoothing the raster rather than the per-edge profile means the result is
     continuous across edge boundaries and is well defined even for edges only
     a few metres long.
@@ -45,13 +48,15 @@ from pathlib import Path
 
 import numpy as np
 
-from .config import CRS_PROJECTED, ELEVATION, PROCESSED_DIR, SF_BBOX
+from .config import CRS_PROJECTED, ELEVATION, PROCESSED_DIR, STUDY_BBOX
 from .download import DEM_DIR
 from .utils import get_logger, progress, step
 
-log = get_logger("sf_flat_routes.elevation")
+log = get_logger("zrh_flat_routes.elevation")
 
-DEM_MOSAIC = PROCESSED_DIR / "dem_sf_1m.tif"
+DEM_MOSAIC = PROCESSED_DIR / "dem_zrh_2m.tif"
+#: Ground sample distance (m) of the mosaic: that of the swissALTI3D tiles.
+DEM_RES_M = 2.0
 PROFILES_NPZ = PROCESSED_DIR / "edge_profiles.npz"
 
 #: Standard deviation (m) of the Gaussian pre-filter applied to the DEM
@@ -63,7 +68,7 @@ DEM_SMOOTH_SIGMA_M = ELEVATION.dem_sigma_m
 # DEM mosaic
 # --------------------------------------------------------------------------
 def build_dem_mosaic(force: bool = False) -> Path:
-    """Merge and clip the 1 m tiles to the study area (cached)."""
+    """Merge and clip the swissALTI3D tiles to the study area (cached)."""
     import rasterio
     from rasterio.merge import merge
     from rasterio.warp import transform_bounds
@@ -72,12 +77,12 @@ def build_dem_mosaic(force: bool = False) -> Path:
         log.info("cached %s", DEM_MOSAIC.name)
         return DEM_MOSAIC
 
-    tiles = sorted(DEM_DIR.glob("*.tif"))
+    tiles = sorted(DEM_DIR.glob("swissalti3d_*.tif"))
     if not tiles:
         raise FileNotFoundError(
-            f"no DEM tiles in {DEM_DIR}; run `python -m sf_flat_routes download`")
+            f"no DEM tiles in {DEM_DIR}; run `python -m zrh_flat_routes download`")
 
-    lon_min, lon_max, lat_min, lat_max = SF_BBOX
+    lon_min, lon_max, lat_min, lat_max = STUDY_BBOX
     bounds = transform_bounds("EPSG:4326", CRS_PROJECTED,
                               lon_min, lat_min, lon_max, lat_max)
     # pad so that edge densification never samples outside the mosaic
@@ -86,9 +91,15 @@ def build_dem_mosaic(force: bool = False) -> Path:
 
     srcs = [rasterio.open(t) for t in tiles]
     try:
-        with step(f"merging {len(srcs)} 1 m DEM tiles over the study area", log):
-            arr, transform = merge(srcs, bounds=bounds, res=(1.0, 1.0),
-                                   nodata=srcs[0].nodata)
+        with step(f"merging {len(srcs)} swissALTI3D tiles over the study area", log):
+            # Tiles are on one 2 m grid aligned to whole kilometres, so
+            # snapping the bounds to it makes the merge a pure copy.
+            bounds = tuple(float(np.floor(b / DEM_RES_M) * DEM_RES_M) if i < 2
+                           else float(np.ceil(b / DEM_RES_M) * DEM_RES_M)
+                           for i, b in enumerate(bounds))
+            nodata = srcs[0].nodata if srcs[0].nodata is not None else -9999.0
+            arr, transform = merge(srcs, bounds=bounds, res=(DEM_RES_M, DEM_RES_M),
+                                   nodata=nodata)
         profile = srcs[0].profile.copy()
     finally:
         for s in srcs:
@@ -96,6 +107,7 @@ def build_dem_mosaic(force: bool = False) -> Path:
 
     profile.update(height=arr.shape[1], width=arr.shape[2], transform=transform,
                    count=1, dtype="float32", compress="lzw", tiled=True,
+                   nodata=nodata, crs=CRS_PROJECTED,
                    blockxsize=512, blockysize=512, BIGTIFF="IF_SAFER")
     DEM_MOSAIC.parent.mkdir(parents=True, exist_ok=True)
     tmp = DEM_MOSAIC.with_suffix(".part.tif")
@@ -360,7 +372,7 @@ def sample_edge_profiles(edges, sampler: DemSampler | None = None,
     # *concatenated* profile of each contiguous run of a street segment, not
     # edge by edge. Smoothing an edge in isolation gives the two edges either
     # side of an intersection different elevations for the same corner, and
-    # in San Francisco that happens every 80 m; the discontinuities then
+    # in a city grid that happens every block; the discontinuities then
     # propagate into the climbing figures.
     from .metrics import contiguous_runs
 

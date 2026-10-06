@@ -1,18 +1,19 @@
-"""Publication-quality static map: San Francisco's low-elevation backbone.
+"""Publication-quality static map: Zurich's low-elevation backbone.
 
-The map answers one question -- *which streets form San Francisco's
-low-elevation transportation backbone?* -- so the visual hierarchy is built
-to answer it and nothing else:
+The map answers one question -- *which streets form Zurich's low-elevation
+transportation backbone?* -- so the visual hierarchy is built to answer it
+and nothing else:
 
-* a hillshade computed from the same 1 m lidar DEM the analysis uses, so the
-  topography the corridors are threading through is visible;
+* a hillshade computed from the same swissALTI3D DEM the analysis uses, so
+  the topography the corridors are threading through is visible, with the
+  lake and rivers drawn as water;
 * the full street network drawn very faintly, present for context but
   carrying almost no visual weight;
 * the discovered corridors drawn boldly, with line width scaled by corridor
   importance and colour by mean gradient;
 * the critical passes marked, because a backbone is defined as much by where
   it must cross a ridge as by where it runs level;
-* labels for the major corridors and for the neighborhoods.
+* labels for the major corridors and for the quarters.
 """
 from __future__ import annotations
 
@@ -21,11 +22,37 @@ import numpy as np
 from .config import OUTPUT_DIR
 from .utils import get_logger, step
 
-log = get_logger("sf_flat_routes.viz_static")
+log = get_logger("zrh_flat_routes.viz_static")
 
-STATIC_PNG = OUTPUT_DIR / "sf_flat_backbone.png"
-STATIC_PDF = OUTPUT_DIR / "sf_flat_backbone.pdf"
-GRADE_PNG = OUTPUT_DIR / "sf_street_grades.png"
+STATIC_PNG = OUTPUT_DIR / "zrh_flat_backbone.png"
+STATIC_PDF = OUTPUT_DIR / "zrh_flat_backbone.pdf"
+GRADE_PNG = OUTPUT_DIR / "zrh_street_grades.png"
+#: Elevation range (m) of the terrain tint: the Limmat leaving the city to
+#: the Zürichberg's crest. The Uetliberg (870 m) saturates.
+TINT_RANGE_M = (390.0, 700.0)
+
+
+def water_geometry(crs: str):
+    """The lake and rivers as one (multi)polygon, from Overture's base theme.
+
+    Returns None when the base-theme water extract is not cached.
+    """
+    import geopandas as gpd
+    import pyarrow.parquet as pq
+    import shapely
+    from shapely.ops import unary_union
+
+    from .download import WATER_PARQUET
+    if not WATER_PARQUET.exists():
+        return None
+    t = pq.read_table(WATER_PARQUET, columns=["subtype", "class", "geometry"]).to_pandas()
+    geom = shapely.from_wkb(t["geometry"].values)
+    poly = shapely.get_type_id(geom) >= 3
+    keep = poly & t["subtype"].isin(["lake", "river", "reservoir", "pond", "water",
+                                     "canal", "stream"]).to_numpy()
+    g = gpd.GeoSeries(geom[keep], crs="EPSG:4326").to_crs(crs)
+    g = g[g.area > 2000]           # the lake, the Limmat and the Sihl, not ponds
+    return unary_union(g.values) if len(g) else None
 
 
 # --------------------------------------------------------------------------
@@ -48,10 +75,10 @@ def hillshade(dem: np.ndarray, res: float = 1.0, azimuth: float = 315.0,
 def _load_hillshade(downsample: int = 3, land_mask_geom=None):
     """Hillshade of the study area, masked to land.
 
-    The 3DEP mosaic carries plausible-looking values across the Bay floor and
-    beyond the study area, which render as spurious beige shelves and a hard
-    diagonal at the tile edge.  Masking to the city boundary is both more
-    honest and much cleaner to look at.
+    The swissALTI3D mosaic runs on beyond the city and carries the lake as a
+    flat surface, which renders as a featureless beige shelf.  Masking to the
+    city boundary, minus the water, is both more honest and much cleaner to
+    look at.
     """
     import rasterio
     from rasterio.enums import Resampling
@@ -81,7 +108,8 @@ def _load_hillshade(downsample: int = 3, land_mask_geom=None):
     # interpolate across the mask edge so the hillshade has no hard rim
     filled = np.where(np.isfinite(filled), filled,
                       np.nanmedian(dem[valid]) if valid.any() else 0.0)
-    hs = hillshade(filled, res=downsample, z_factor=2.1)
+    from .elevation import DEM_RES_M
+    hs = hillshade(filled, res=downsample * DEM_RES_M, z_factor=2.1)
     return hs, dem_f, valid, bounds
 
 
@@ -101,6 +129,9 @@ def make_backbone_map(corridors, edges, neighborhoods, passes=None,
     with step("rendering the static backbone map", log):
         from shapely.ops import unary_union
         land_geom = unary_union(neighborhoods.geometry.values).buffer(60)
+        water = water_geometry(str(neighborhoods.crs))
+        if water is not None:
+            land_geom = land_geom.difference(water)
         hs, dem, valid, bounds = _load_hillshade(land_mask_geom=land_geom)
         extent = (bounds.left, bounds.right, bounds.bottom, bounds.top)
 
@@ -111,10 +142,10 @@ def make_backbone_map(corridors, edges, neighborhoods, passes=None,
         # --- terrain: hillshade tinted by elevation -------------------
         land = np.where(valid, 1.0, np.nan)
         elev_cmap = LinearSegmentedColormap.from_list(
-            "sf_terrain", ["#f2efe6", "#e8e1cf", "#ddd2b6", "#cfc09b",
-                           "#bfa87f"])
+            "zrh_terrain", ["#f2efe6", "#e8e1cf", "#ddd2b6", "#cfc09b",
+                            "#bfa87f"])
         ax.imshow(dem, extent=extent, origin="upper", cmap=elev_cmap,
-                  norm=Normalize(-10, 250), alpha=1.0, interpolation="bilinear",
+                  norm=Normalize(*TINT_RANGE_M), alpha=1.0, interpolation="bilinear",
                   zorder=1)
         ax.imshow(hs * land, extent=extent, origin="upper", cmap="gray",
                   alpha=0.52, interpolation="bilinear", vmin=0.15, vmax=0.95,
@@ -200,12 +231,12 @@ def make_backbone_map(corridors, edges, neighborhoods, passes=None,
         for sp in ax.spines.values():
             sp.set_visible(False)
 
-        ax.set_title("San Francisco's low-elevation backbone",
+        ax.set_title("Zurich's low-elevation backbone",
                      fontsize=21, fontweight="bold", color="#14202b",
                      loc="left", pad=16)
         ax.text(0.0, 1.006,
                 f"Streets that repeatedly carry low-gradient routes between "
-                f"neighborhoods  ·  {mode}ing network",
+                f"quarters  ·  {mode}ing network",
                 transform=ax.transAxes, fontsize=10.2, color="#4a5560",
                 va="bottom")
 
@@ -229,9 +260,9 @@ def make_backbone_map(corridors, edges, neighborhoods, passes=None,
                   edgecolor="#c9cdd2", borderpad=0.7)
 
         ax.text(0.995, -0.018,
-                "Street network: Overture Maps (OpenStreetMap, ODbL)  ·  "
-                "Elevation: USGS 3DEP 1 m lidar  ·  "
-                "Neighborhoods: SF Planning / DataSF",
+                "Street network: © OpenStreetMap contributors (ODbL), via Overture Maps  ·  "
+                "Elevation: swissALTI3D, Federal Office of Topography swisstopo  ·  "
+                "Quarters: Stadt Zürich Open Data",
                 transform=ax.transAxes, fontsize=6.4, color="#6a747d",
                 ha="right", va="top")
 
@@ -298,10 +329,10 @@ def make_grade_map(edges, neighborhoods, mode: str = "walk"):
         ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
         for sp in ax.spines.values():
             sp.set_visible(False)
-        ax.set_title("San Francisco street gradients", fontsize=19,
+        ax.set_title("Zurich street gradients", fontsize=19,
                      fontweight="bold", loc="left", pad=14)
         ax.text(0.0, 1.005, "Maximum sampled gradient per street segment, "
-                            "from USGS 3DEP 1 m lidar",
+                            "from swissALTI3D (Federal Office of Topography swisstopo)",
                 transform=ax.transAxes, fontsize=9.6, color="#4a5560",
                 va="bottom")
         sm = ScalarMappable(norm=norm, cmap=cmap)

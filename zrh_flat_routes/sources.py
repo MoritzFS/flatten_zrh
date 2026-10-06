@@ -1,7 +1,7 @@
 """Registry of every external dataset used by the project.
 
 Each entry records the URL, the access date, resolution/vintage, licence and
-the limitations that matter for this analysis.  ``python -m sf_flat_routes
+the limitations that matter for this analysis.  ``python -m zrh_flat_routes
 sources`` prints this table, and it is the single source of truth for the
 data-provenance section of the README.
 """
@@ -10,41 +10,47 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 #: Date on which every URL below was last fetched and verified.
-ACCESS_DATE = "2026-09-16"
+ACCESS_DATE = "2026-10-06"
 
 #: Overture Maps release used for the street network.
-OVERTURE_RELEASE = "2026-08-19.0"
+OVERTURE_RELEASE = "2026-09-23.1"
 OVERTURE_BUCKET = "https://overturemaps-us-west-2.s3.amazonaws.com"
 OVERTURE_PREFIX = f"release/{OVERTURE_RELEASE}/theme=transportation"
-#: Places and addresses themes of the same release, used only for the route
-#: page's offline place search (fetched 2026-10-04).
+#: Places, addresses and base themes of the same release, used only for the
+#: route page's offline place search.
 OVERTURE_PLACES_PREFIX = f"release/{OVERTURE_RELEASE}/theme=places"
 OVERTURE_ADDRESSES_PREFIX = f"release/{OVERTURE_RELEASE}/theme=addresses"
 OVERTURE_BASE_PREFIX = f"release/{OVERTURE_RELEASE}/theme=base"
 
-#: USGS 3DEP 1 m lidar project covering San Francisco.
-TNM_BUCKET = "https://prd-tnm.s3.amazonaws.com"
-LIDAR_PROJECT = "CA_SanFrancisco_B23"
-LIDAR_PREFIX = f"StagedProducts/Elevation/1m/Projects/{LIDAR_PROJECT}/TIFF"
-LIDAR_TILES = (
-    "USGS_1M_10_x54y418_CA_SanFrancisco_B23.tif",
-    "USGS_1M_10_x54y419_CA_SanFrancisco_B23.tif",
-    "USGS_1M_10_x55y418_CA_SanFrancisco_B23.tif",
-    "USGS_1M_10_x55y419_CA_SanFrancisco_B23.tif",
-)
+#: swisstopo's STAC catalogue, which lists one item per 1 km swissALTI3D tile.
+STAC_ROOT = "https://data.geo.admin.ch/api/stac/v0.9"
+SWISSALTI3D_COLLECTION = "ch.swisstopo.swissalti3d"
+#: Ground sample distance (m) of the swissALTI3D product used.
+SWISSALTI3D_GSD = "2"
+#: The DHM25 matrix model, one national ASCII grid in LV03; validation only.
+DHM25_URL = "https://cms.geo.admin.ch/ogd/topography/DHM25_MM_ASCII_GRID.zip"
 
-#: USGS 1/3 arc-second seamless DEM tile, used only to cross-validate the
-#: lidar product (it is ~10 m and far too coarse for street grades).
-SEAMLESS_DEM_URL = (
-    f"{TNM_BUCKET}/StagedProducts/Elevation/13/TIFF/current/n38w123/"
-    "USGS_13_n38w123.tif"
-)
+#: City of Zurich open-data WFS for the statistical quarters.
+QUARTERS_WFS = "https://www.ogd.stadt-zuerich.ch/wfs/geoportal/Statistische_Quartiere"
+QUARTERS_TYPENAME = "adm_statistische_quartiere_map"
+QUARTERS_PAGE = "https://data.stadt-zuerich.ch/dataset/geo_statistische_quartiere"
 
-#: San Francisco neighborhood polygons.
-NEIGHBORHOOD_URL = (
-    "https://raw.githubusercontent.com/codeforamerica/click_that_hood/"
-    "master/public/data/san-francisco.geojson"
-)
+#: swisstopo's official directory of building addresses (national file).
+ADDRESSES_COLLECTION = "ch.swisstopo.amtliches-gebaeudeadressverzeichnis"
+#: The study area in LV95 (xmin, ymin, xmax, ymax), for cutting national files.
+LV95_WINDOW = (2673000, 1238000, 2692000, 1257000)
+
+#: OpenStreetMap ways carrying an ``incline`` tag, via the Overpass API;
+#: validation only.
+OVERPASS_URLS = ("https://overpass-api.de/api/interpreter",
+                 "https://overpass.kumi.systems/api/interpreter")
+
+#: Some build sandboxes cannot reach data.geo.admin.ch, cms.geo.admin.ch,
+#: ogd.stadt-zuerich.ch or the Overpass API. The workflow
+#: ``.github/workflows/mirror-data.yml`` fetches those files in GitHub
+#: Actions and attaches them, unmodified (DHM25 cut to a window around
+#: Zurich), to this release; ``download`` falls back to it.
+MIRROR_RELEASE = "https://github.com/MoritzFS/flatten_zrh/releases/download/source-data"
 
 
 @dataclass(frozen=True)
@@ -76,20 +82,19 @@ DATASETS: tuple[Dataset, ...] = (
         licence="ODbL 1.0 (OpenStreetMap contributors); Overture schema CDLA-Permissive 2.0",
         role="Routable street network: geometry, road class, per-mode access "
              "restrictions, bridge/tunnel flags and connector topology.",
-        local="data/raw/overture_segments_sf.parquet",
+        local="data/raw/overture_segments_zrh.parquet",
         limitations=(
-            "OSM-derived, so completeness and tagging quality vary by area. "
-            "Road classification of SF arterials is inconsistent in places "
-            "(Van Ness Ave, 19th Ave, Lombard St and part of Mission St are "
-            "tagged 'trunk' although they are ordinary surface streets, so "
-            "'trunk' cannot be excluded from walking/biking). A few freeway "
-            "ramp segments carry the surface street's name (Octavia Blvd, "
-            "Junipero Serra Blvd). Sidewalk and crosswalk geometry is present "
-            "but of uneven completeness and is deliberately not used."
+            "OSM-derived, so completeness and tagging quality vary by area, "
+            "though Zurich is among the most thoroughly mapped cities in "
+            "Europe. Separately mapped sidewalks and crossings are present "
+            "but deliberately not used: travel is modelled on street "
+            "centrelines. Swiss mappers tag limited-access 'Autostrassen' as "
+            "trunk, with walking and cycling denied by access rules, which "
+            "the access parser honours."
         ),
-        notes="Read with Parquet row-group bbox pruning: only 7 of 16,384 "
-              "global row groups intersect San Francisco, so the whole "
-              "extract costs a few seconds and ~10 MB instead of 64 GB.",
+        notes="Read with Parquet row-group bbox pruning, so the whole "
+              "extract costs a few seconds and a few MB instead of the "
+              "theme's tens of gigabytes.",
     ),
     Dataset(
         key="overture_connectors",
@@ -101,89 +106,105 @@ DATASETS: tuple[Dataset, ...] = (
         licence="ODbL 1.0; Overture schema CDLA-Permissive 2.0",
         role="Authoritative intersection nodes. Using connector IDs for graph "
              "topology avoids geometric snapping tolerances entirely.",
-        local="data/raw/overture_connectors_sf.parquet",
+        local="data/raw/overture_connectors_zrh.parquet",
         limitations="Connectors exist only where OSM ways share a node; "
                     "grade-separated crossings correctly do not connect.",
     ),
     Dataset(
-        key="dem_1m",
-        title=f"USGS 3DEP 1 metre bare-earth DEM, project {LIDAR_PROJECT}",
-        publisher="U.S. Geological Survey, 3D Elevation Program",
-        url=f"{TNM_BUCKET}/{LIDAR_PREFIX}/",
+        key="dem_swissalti3d",
+        title="swissALTI3D digital terrain model, 2 m (2026 edition)",
+        publisher="Federal Office of Topography swisstopo",
+        url=f"{STAC_ROOT}/collections/{SWISSALTI3D_COLLECTION}",
         accessed=ACCESS_DATE,
-        resolution="1 m ground sample distance; NAD83/UTM 10N (EPSG:26910); "
-                   "float32 metres above NAVD88",
-        licence="Public domain (U.S. Government work)",
+        resolution="2 m grid, 1 km tiles; CH1903+/LV95 (EPSG:2056); float32 "
+                   "metres above sea level (LN02)",
+        licence="swisstopo Open Government Data: free use, commercial use "
+                "included; source reference mandatory "
+                "('Federal Office of Topography swisstopo' or '©swisstopo')",
         role="Primary elevation source for all grade and climbing metrics.",
         local="data/raw/dem/*.tif",
         limitations=(
-            "Bare-earth interpolation leaves artefacts on bridges, tunnels and "
-            "elevated structures, where the DEM samples the ground or water "
-            "surface underneath rather than the deck -- handled explicitly by "
-            "interpolating elevation across segments flagged is_bridge or "
-            "is_tunnel. Residual noise of a few decimetres from vehicles, "
-            "curbs and vegetation misclassification is handled by "
-            "Savitzky-Golay smoothing plus a gain dead-band. Four 10 km tiles "
-            "(~523 MB total) are cloud-optimised GeoTIFFs, so windowed reads "
-            "are cheap."
+            "A bare-earth model (buildings and vegetation removed), produced "
+            "from airborne lidar and published at 0.5 m and 2 m; the 2 m "
+            "product is used, which is far finer than the 50 m smoothing "
+            "window the analysis applies. Bridges, tunnels and elevated "
+            "structures are removed, so the model describes the ground or "
+            "water under a deck -- handled explicitly by interpolating "
+            "elevation across segments flagged is_bridge or is_tunnel. "
+            "swisstopo gives its accuracy (1 sigma) as 0.3 m where it is "
+            "built from new-generation lidar and 0.5 m from the previous "
+            "generation below 2,000 m; it is updated on a six-year cycle. "
+            "316 tiles cover the study area."
         ),
     ),
     Dataset(
-        key="dem_13",
-        title="USGS 3DEP 1/3 arc-second seamless DEM, tile n38w123",
-        publisher="U.S. Geological Survey, 3D Elevation Program",
-        url=SEAMLESS_DEM_URL,
+        key="dem_dhm25",
+        title="DHM25 matrix model (25 m), window around Zurich",
+        publisher="Federal Office of Topography swisstopo",
+        url=DHM25_URL,
         accessed=ACCESS_DATE,
-        resolution="1/3 arc-second (~10 m); EPSG:4269",
-        licence="Public domain (U.S. Government work)",
-        role="Independent cross-check on the 1 m lidar elevations (validation "
-             "only -- too coarse for street grades).",
-        local="data/raw/dem_13_n38w123.tif",
-        limitations="~10 m posting smooths away street-scale relief and "
-                    "systematically under-reports maximum grades.",
+        resolution="25 m grid; CH1903/LV03 (EPSG:21781); metres above sea level (LN02)",
+        licence="swisstopo Open Government Data; source reference mandatory",
+        role="Independent cross-check on swissALTI3D (validation only -- too "
+             "coarse for street grades).",
+        local="data/raw/dhm25_zurich_lv03.tif",
+        limitations="Interpolated from the contour lines and spot heights of "
+                    "the Swiss National Map, so it shares no lidar with "
+                    "swissALTI3D, but its 25 m posting smooths away "
+                    "street-scale relief and it predates much of the city's "
+                    "recent construction.",
         optional=True,
     ),
     Dataset(
         key="neighborhoods",
-        title="San Francisco neighborhoods (37-neighborhood planning set)",
-        publisher="San Francisco Planning Department / DataSF, "
-                  "mirrored by Code for America (click_that_hood)",
-        url=NEIGHBORHOOD_URL,
+        title="Statistische Quartiere (statistical quarters) of the City of Zurich",
+        publisher="Stadt Zürich: Statistik Stadt Zürich and GIS-Zentrum "
+                  "(Geomatik + Vermessung), via Open Data Zürich",
+        url=QUARTERS_PAGE,
         accessed=ACCESS_DATE,
-        resolution="Vector polygons, 37 features",
-        licence="Public domain / open data (City & County of San Francisco)",
-        role="Neighborhood boundaries for origin/destination selection and "
-             "corridor attribution.",
-        local="data/raw/sf_neighborhoods.geojson",
+        resolution="Vector polygons, 34 quarters in 12 districts (Kreise); "
+                   "dataset last updated 2026-10-02",
+        licence="CC0 1.0 (Creative Commons Zero), as published on "
+                "data.stadt-zuerich.ch; opendata.swiss lists it as 'Open use'",
+        role="Quarter boundaries for origin/destination selection, corridor "
+             "attribution and the city boundary that clips the network.",
+        local="data/raw/zrh_quarters.geojson",
         limitations=(
-            "This is the long-standing 37-unit San Francisco planning "
-            "neighborhood set, not the newer 41-unit 'Analysis Neighborhoods' "
-            "product. It is used because data.sfgov.org is unreachable from "
-            "the build environment (blocked by egress policy), so the DataSF "
-            "API could not be called; this Code for America mirror is the "
-            "closest reachable equivalent. Boundary vintage is not stated by "
-            "the mirror. The two products differ mainly in how the Sunset, "
-            "Richmond and Twin Peaks areas are subdivided, which affects "
-            "representative-point placement but not the street model."
+            "Statistical units, not the 23 historical quarters (Quartiere) "
+            "alone: several large historical quarters are split (Wiedikon, "
+            "Aussersihl, Schwamendingen...). Quarters bordering the lake "
+            "include water, which affects the geometric centroid but not "
+            "the street-weighted access point the analysis uses."
         ),
-        substituted=True,
-        substitution_reason=(
-            "DataSF (data.sfgov.org) and sfgov.org are blocked by the "
-            "environment's network policy; the official 41-neighborhood "
-            "Analysis Neighborhoods GeoJSON could not be downloaded."
-        ),
+    ),
+    Dataset(
+        key="osm_incline",
+        title="OpenStreetMap ways with an incline tag (via the Overpass API)",
+        publisher="OpenStreetMap contributors",
+        url=OVERPASS_URLS[0],
+        accessed=ACCESS_DATE,
+        resolution="Tag values on OSM ways, mostly copied from gradient "
+                   "warning signs",
+        licence="ODbL 1.0 (OpenStreetMap contributors)",
+        role="Independent reference gradients for validating computed street "
+             "grades (validation only).",
+        local="data/raw/osm_incline_zurich.json",
+        limitations="Coverage is sparse and the values are what mappers "
+                    "entered: some are signed maxima, some estimates, some "
+                    "just 'up'/'down'. Only numeric percentages are used.",
+        optional=True,
     ),
     Dataset(
         key="overture_places",
         title=f"Overture Maps places (release {OVERTURE_RELEASE})",
-        publisher="Overture Maps Foundation (Meta and Microsoft POI data)",
+        publisher="Overture Maps Foundation (Meta, Microsoft and other POI sources)",
         url=f"{OVERTURE_BUCKET}/{OVERTURE_PLACES_PREFIX}/type=place/",
-        accessed="2026-10-04",
+        accessed=ACCESS_DATE,
         resolution="Point features with names, categories and a confidence score",
         licence="CDLA Permissive 2.0",
         role="Offline place search in the route page (parks, landmarks, "
              "transit, schools, shops, cafes).",
-        local="data/raw/overture_places_sf.parquet",
+        local="data/raw/overture_places_zrh.parquet",
         limitations="Point-of-interest coverage and naming are uneven; only "
                     "records with confidence >= 0.6 in routable categories "
                     "are kept. Not used by the analysis itself.",
@@ -194,57 +215,37 @@ DATASETS: tuple[Dataset, ...] = (
         title=f"Overture Maps base theme: land use, infrastructure, land (release {OVERTURE_RELEASE})",
         publisher="Overture Maps Foundation (derived from OpenStreetMap)",
         url=f"{OVERTURE_BUCKET}/{OVERTURE_BASE_PREFIX}/",
-        accessed="2026-10-04",
+        accessed=ACCESS_DATE,
         resolution="Mapped outlines and points with names and OSM-derived classes",
         licence="ODbL 1.0 (OpenStreetMap contributors)",
         role="Mapped parks, schools, hospitals, plazas, stations, piers, "
              "bridges, viewpoints, peaks and beaches for the route page's "
              "offline search; these outrank the POI feed, which places the "
              "same names unreliably.",
-        local="data/raw/overture_{land_use,infrastructure,land}_sf.parquet",
+        local="data/raw/overture_{land_use,infrastructure,land}_zrh.parquet",
         limitations="Only named features in a fixed class list are used. "
                     "Not used by the analysis itself.",
         optional=True,
     ),
     Dataset(
-        key="overture_addresses",
-        title=f"Overture Maps addresses (release {OVERTURE_RELEASE})",
-        publisher="Overture Maps Foundation (OpenAddresses / City of San Francisco)",
-        url=f"{OVERTURE_BUCKET}/{OVERTURE_ADDRESSES_PREFIX}/type=address/",
-        accessed="2026-10-04",
-        resolution="Address points with street number and street name",
-        licence="Open (OpenAddresses sources; SF data is public domain)",
+        key="addresses",
+        title="Official directory of building addresses (Amtliches Verzeichnis "
+              "der Gebäudeadressen), rows inside the study area",
+        publisher="Federal Office of Topography swisstopo",
+        url=f"{STAC_ROOT}/collections/{ADDRESSES_COLLECTION}",
+        accessed=ACCESS_DATE,
+        resolution="One point per building entrance, with street name and "
+                   "house number; LV95",
+        licence="swisstopo Open Government Data; source reference mandatory",
         role="Offline street-address search in the route page.",
-        local="data/raw/overture_addresses_sf.parquet",
-        limitations="One point per (street, number) is kept; unit numbers "
-                    "are dropped. Not used by the analysis itself.",
+        local="data/raw/swisstopo_addresses_zurich.csv",
+        limitations="One point per (street, leading house number) is kept; "
+                    "letter and sub-number suffixes ('12a', '4.1') fold into "
+                    "the number. Not used by the analysis itself. Overture "
+                    "also carries Swiss addresses (OpenAddresses source "
+                    "'ch/countrywide'), but labels their licence only as "
+                    "proprietary, so the official register is used instead.",
         optional=True,
-    ),
-    Dataset(
-        key="bike_network",
-        title="SFMTA bicycle network / SF Slow Streets",
-        publisher="SFMTA via DataSF",
-        url="https://data.sfgov.org/  (dataset ids: SFMTA Bikeway Network; "
-            "Slow Streets)",
-        accessed="not retrieved",
-        resolution="n/a",
-        licence="Open data (City & County of San Francisco)",
-        role="Optional bicycle-facility and low-stress-street overlay.",
-        local="(derived instead from Overture/OSM attributes)",
-        limitations=(
-            "Not retrievable: data.sfgov.org is blocked by the environment's "
-            "network policy. Bicycle facilities and low-stress streets are "
-            "therefore derived from Overture/OSM attributes instead "
-            "(class=cycleway, class=living_street, class=pedestrian, "
-            "bicycle-designated paths). OSM bicycle tagging in San Francisco "
-            "is largely conflated with SFMTA data by local mappers, so the "
-            "derived layer is a good but not authoritative proxy; it will not "
-            "carry SFMTA facility classes (Class I/II/III/IV) or the official "
-            "Slow Streets designation list."
-        ),
-        optional=True,
-        substituted=True,
-        substitution_reason="data.sfgov.org blocked by network policy.",
     ),
 )
 

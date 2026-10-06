@@ -1,6 +1,7 @@
-/* San Francisco flat routes -- the routing engine.
+/* Zurich flat routes -- the routing engine (from flattensf by Drew Edwards,
+ * MIT licence).
  *
- * The whole routable graph is embedded (see sf_flat_routes/webgraph.py), so
+ * The whole routable graph is embedded (see zrh_flat_routes/webgraph.py), so
  * routing happens in the browser: a Dijkstra over ~160,000 directed arcs with
  * the same cost model Python uses. Shared by the explorer (app.js) and the
  * simple route page (simple.js).
@@ -677,7 +678,7 @@ class Grid {
     for (let rings = 1; rings <= 6 && best < 0; rings++) {
       for (const i of this.near(x, y, rings)) consider(i);
     }
-    // nothing within a few cells (a click far out in the bay): scan everything
+    // nothing within a few cells (a click far out in the lake): scan everything
     if (best < 0) for (let i = 0; i < this.xs.length; i++) consider(i);
     return best;
   }

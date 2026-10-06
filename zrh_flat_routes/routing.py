@@ -49,7 +49,7 @@ import pandas as pd
 from .config import CostWeights, GRADE_THRESHOLDS, MODES
 from .utils import get_logger
 
-log = get_logger("sf_flat_routes.routing")
+log = get_logger("zrh_flat_routes.routing")
 
 _TH = [int(t * 100) for t in GRADE_THRESHOLDS]
 

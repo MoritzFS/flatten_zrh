@@ -21,7 +21,7 @@ from .routing import (RouteGraph, arcs_from_predecessors, shortest_paths,
                       summarise_route)
 from .utils import get_logger, progress, step
 
-log = get_logger("sf_flat_routes.pairs")
+log = get_logger("zrh_flat_routes.pairs")
 
 _TH = [int(t * 100) for t in GRADE_THRESHOLDS]
 

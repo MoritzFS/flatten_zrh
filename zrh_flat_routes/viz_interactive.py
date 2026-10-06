@@ -5,14 +5,14 @@ byte of data embedded, so they can be moved around and opened directly, and
 both route in the browser over the packed graph (``webgraph.py``) with the
 same cost model Python uses.
 
-* **Explorer** (``outputs/sf_flat_routes_map.html``): every analysis layer
+* **Explorer** (``outputs/zrh_flat_routes_map.html``): every analysis layer
   (gradient-coloured network, corridors, passes, barriers, basins, bike
   facilities), the four objectives with live weight sliders, Pareto readout
   and the cost-warped city. Dense by design; this is the working view.
 * **Route page**: one card with origin, destination and a shortest-to-
   flattest slider over a quiet hillshade. Place search is offline
   (intersections from the graph, Overture places and addresses packed into
-  the page). Written twice: as ``outputs/sf_flat_route_finder.html``, one
+  the page). Written twice: as ``outputs/zrh_flat_route_finder.html``, one
   file that opens from disk, and as the static site in ``site/`` (HTML, CSS,
   JS, the gzipped graph and the hillshade as separate cacheable files),
   which GitHub Pages serves as the demo.
@@ -25,14 +25,15 @@ from pathlib import Path
 
 import numpy as np
 
-from .config import OUTPUT_DIR, PRODUCT_NAME, REPO_URL, SITE_DIR, SITE_DOMAIN, SITE_URL
+from .config import (OUTPUT_DIR, PRODUCT_NAME, REPO_URL, SITE_DIR, SITE_URL,
+                     UPSTREAM_SITE, UPSTREAM_URL)
 from .utils import get_logger, human_bytes, step
 
-log = get_logger("sf_flat_routes.viz_interactive")
+log = get_logger("zrh_flat_routes.viz_interactive")
 
-INTERACTIVE_HTML = OUTPUT_DIR / "sf_flat_routes_map.html"
+INTERACTIVE_HTML = OUTPUT_DIR / "zrh_flat_routes_map.html"
 #: The route finder as one self-contained file, and as a static site.
-SIMPLE_HTML = OUTPUT_DIR / "sf_flat_route_finder.html"
+SIMPLE_HTML = OUTPUT_DIR / "zrh_flat_route_finder.html"
 SITE_INDEX = SITE_DIR / "index.html"
 WEB_DIR = Path(__file__).resolve().parent / "web"
 VENDOR_DIR = Path(__file__).resolve().parent / "vendor"
@@ -93,7 +94,7 @@ def build_layers(ctx, corridors, passes, barriers, basins):
     edges = ctx.edges
     layers = {
         "neighborhoods": _geojson(ctx.neighborhoods,
-                                  ["neighborhood", "area_km2"], simplify=12.0),
+                                  ["neighborhood", "district", "area_km2"], simplify=12.0),
         "corridors": _geojson(
             corridors.to_crs(edges.crs) if corridors.crs != edges.crs else corridors,
             ["corridor_id", "corridor_name", "street_names", "mode",
@@ -103,7 +104,7 @@ def build_layers(ctx, corridors, passes, barriers, basins):
             simplify=5.0),
         "passes": _geojson(
             passes.to_crs(edges.crs) if passes.crs != edges.crs else passes,
-            ["edge_id", "name", "neighborhood", "pass_elev_m", "pass_elev_ft",
+            ["edge_id", "name", "neighborhood", "pass_elev_m",
              "pairs_served", "max_abs_grade", "neighborhoods_separated"],
             simplify=2.0),
         "barriers": _geojson(
@@ -132,19 +133,19 @@ def build_layers(ctx, corridors, passes, barriers, basins):
 
 
 #: Guided examples, so that opening the map demonstrates the findings
-#: without anyone having to know which neighborhoods to pick. Notes are
-#: filled in from the analysis outputs at build time.
+#: without anyone having to know which quarters to pick. Notes are filled in
+#: from the analysis outputs at build time.
 _EXAMPLE_PAIRS = (
-    ("Mission", "Outer Sunset", "walk", "min_climb",
-     "crossing the city east to west"),
-    ("Noe Valley", "Financial District", "walk", "min_climb",
-     "almost all the climbing is optional"),
-    ("Bayview", "Golden Gate Park", "walk", "min_climb",
-     "the biggest single saving in the city"),
-    ("Mission", "Marina", "bike", "balanced",
-     "by bicycle, over the northern saddles"),
-    ("West of Twin Peaks", "Downtown/Civic Center", "walk", "grade_averse",
-     "behind the Twin Peaks barrier: no cheap way over"),
+    ("Langstrasse", "Witikon", "walk", "min_climb",
+     "from the valley floor to the top of the Zürichberg"),
+    ("Altstetten", "Oerlikon", "bike", "balanced",
+     "by bicycle, from the Limmat valley to the Glatt valley"),
+    ("City", "Höngg", "walk", "min_climb",
+     "along the river or over the hill"),
+    ("Wollishofen", "Hochschulen", "bike", "balanced",
+     "lakeside, then up to the university terrace"),
+    ("Friesenberg", "Hirslanden", "walk", "grade_averse",
+     "slope to slope, across the whole valley"),
 )
 
 
@@ -167,8 +168,8 @@ def _examples(points: dict) -> list[dict]:
             if len(sel):
                 r = sel.iloc[0]
                 note = (f"{blurb} &mdash; "
-                        f"{r['shortest_gain_m']*3.28084:.0f} ft of climbing "
-                        f"becomes {r['elev_gain_m']*3.28084:.0f} ft")
+                        f"{r['shortest_gain_m']:.0f} m of climbing "
+                        f"becomes {r['elev_gain_m']:.0f} m")
         out.append({"o": o, "d": d, "mode": mode, "profile": prof,
                     "note": note})
     return out
@@ -185,11 +186,13 @@ def _vendor(name: str) -> str:
 
 def _render(payload: dict) -> str:
     """The explorer page."""
+    from .passes import BASIN_ELEV_M
     html = _asset("index.html")
     html = html.replace("/*__LEAFLET_CSS__*/", _vendor("leaflet-1.9.4.css"))
     html = html.replace("/*__APP_CSS__*/", _asset("app.css"))
     html = html.replace("/*__LEAFLET_JS__*/", _vendor("leaflet-1.9.4.min.js"))
-    html = html.replace("/*__APP_JS__*/", _asset("engine.js") + "\n" + _asset("app.js")
+    html = html.replace("/*__APP_JS__*/", _asset("engine.js") + "\n"
+                        + _asset("app.js").replace("/*__BASIN_ELEV__*/", f"{BASIN_ELEV_M:.0f}")
                         + "\n" + _asset("warp.js"))
     return html.replace("/*__DATA__*/", json.dumps(payload, separators=(",", ":")))
 
@@ -199,7 +202,10 @@ def _route_page_html(payload: dict, linked: bool, assets: dict | None = None) ->
 
     ``assets`` maps each plain asset name to its content-hashed file name.
     """
-    html = _asset("simple.html").replace("/*__REPO_URL__*/", REPO_URL)
+    html = (_asset("simple.html").replace("/*__REPO_URL__*/", REPO_URL)
+            .replace("/*__UPSTREAM_SITE__*/", UPSTREAM_SITE)
+            .replace("/*__UPSTREAM_URL__*/", UPSTREAM_URL)
+            .replace("/*__N_ARCS__*/", f"{round(payload['meta'].get('n_edges', 0), -3):,.0f}"))
     if linked:
         a = assets or {}
         html = html.replace('<style>/*__LEAFLET_CSS__*/</style>',
@@ -215,9 +221,9 @@ def _route_page_html(payload: dict, linked: bool, assets: dict | None = None) ->
             '<link rel="icon" href="favicon.svg" type="image/svg+xml">',
             '<meta property="og:type" content="website">',
             f'<meta property="og:title" content="{PRODUCT_NAME}">',
-            '<meta property="og:site_name" content="Flatten SF">',
+            f'<meta property="og:site_name" content="{PRODUCT_NAME}">',
             '<meta property="og:description" content="The flattest walking or '
-            'cycling route between any two places in San Francisco, and every '
+            'cycling route between any two places in Zürich, and every '
             'route between it and the shortest one.">',
             f'<meta property="og:url" content="{SITE_URL}">',
             f'<meta property="og:image" content="{SITE_URL}preview.jpg">',
@@ -225,12 +231,12 @@ def _route_page_html(payload: dict, linked: bool, assets: dict | None = None) ->
             '<meta property="og:image:type" content="image/jpeg">',
             '<meta property="og:image:width" content="1200">',
             '<meta property="og:image:height" content="630">',
-            '<meta property="og:image:alt" content="A map of San Francisco with a fan of '
-            'walking routes between Trick Dog and the dragon in Golden Gate Park">',
+            '<meta property="og:image:alt" content="A map of Zürich with a fan of '
+            'walking routes between Zürich HB and the Dolder">',
             '<meta name="twitter:card" content="summary_large_image">',
             f'<meta name="twitter:title" content="{PRODUCT_NAME}">',
             '<meta name="twitter:description" content="The flattest walking or cycling '
-            'route between any two places in San Francisco, and every route between '
+            'route between any two places in Zürich, and every route between '
             'it and the shortest one.">',
             f'<meta name="twitter:image" content="{SITE_URL}preview.jpg">',
             f'<link rel="preload" href="{payload["bundle_url"]}" as="fetch" crossorigin>',
@@ -252,20 +258,11 @@ _FAVICON = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
 """
 
 
-#: Where the route page opens before anyone types: Trick Dog, in the
-#: Mission, to Naga & the Captainess, the 100-foot sea-serpent sculpture in
-#: the Rainbow Falls pond on JFK Promenade in Golden Gate Park. Chosen by
-#: scoring every pair of well-known Mission bars and Golden Gate Park spots
-#: on the frontier search: the shortest path climbs over the Castro and
-#: Buena Vista hills, the flattest saves about half the climbing for 10%
-#: more distance, and the frontier holds some eighty distinct routes.
-#: Each entry is (label, place names to try in order, fallback), where the
-#: fallback is a neighborhood access point or a (lon, lat) pair for a spot
-#: the index does not carry.
-_DEFAULT_TRIP = (
-    ("Trick Dog", ("Trick Dog",), "Mission"),
-    ("The Dragon, Golden Gate Park", (), (-122.4779, 37.7716)),
-)
+#: Where the route page opens before anyone types. Each entry is (label,
+#: place names to try in order, fallback), where the fallback is a quarter's
+#: access point or a (lon, lat) pair for a spot the index does not carry.
+#: Set from ``DEFAULT_TRIP`` in config.py.
+from .config import DEFAULT_TRIP as _DEFAULT_TRIP  # noqa: E402
 
 
 def _default_trip(places: dict | None, points: dict) -> list[dict]:
@@ -306,7 +303,7 @@ def _write_route_page(ctx, graph: dict, pts: dict) -> Path:
     import hashlib
     import shutil
 
-    from .download import ADDRESSES_PARQUET, PLACES_PARQUET
+    from .download import ADDRESSES_CSV, PLACES_PARQUET
     from .places import build_addresses, build_hillshade, build_places
     from .webgraph import bundle
 
@@ -318,7 +315,7 @@ def _write_route_page(ctx, graph: dict, pts: dict) -> Path:
         strings["places"] = json.dumps(places, separators=(",", ":"))
     else:
         log.warning("no places parquet; the route page will search intersections only")
-    if ADDRESSES_PARQUET.exists():
+    if ADDRESSES_CSV.exists():
         addr = build_addresses()
         strings["addr_streets"] = json.dumps(addr["streets"], separators=(",", ":"))
         for k in ("street", "number", "lon", "lat"):
@@ -384,9 +381,8 @@ def _write_route_page(ctx, graph: dict, pts: dict) -> Path:
         (SITE_DIR / plain).unlink(missing_ok=True)
     (SITE_DIR / "favicon.svg").write_text(_FAVICON, encoding="utf-8")
     (SITE_DIR / ".nojekyll").write_text("", encoding="utf-8")
-    # GitHub Pages reads the custom domain from here on branch deploys and
-    # from Settings -> Pages on Actions deploys; shipping it covers both
-    (SITE_DIR / "CNAME").write_text(SITE_DOMAIN + "\n", encoding="utf-8")
+    # a project site on moritzfs.github.io: no custom domain, so no CNAME
+    (SITE_DIR / "CNAME").unlink(missing_ok=True)
     site_bytes = sum(f.stat().st_size for f in SITE_DIR.rglob("*") if f.is_file())
     log.info("wrote %s (%s) and the site in %s (%s)", SIMPLE_HTML.name,
              human_bytes(SIMPLE_HTML.stat().st_size), SITE_DIR.name, human_bytes(site_bytes))

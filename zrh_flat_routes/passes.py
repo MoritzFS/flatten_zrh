@@ -1,4 +1,4 @@
-"""Passes, saddles and barriers: where San Francisco's geography forces a climb.
+"""Passes, saddles and barriers: where Zurich's geography forces a climb.
 
 Method
 ------
@@ -19,8 +19,10 @@ spanning tree, and its critical edges are precisely the city's passes.
 Rather than asking about arbitrary node pairs, the analysis first identifies
 the **lowland basins**: connected components of the street network lying
 entirely below a low-elevation threshold.  These are the flat districts that
-people actually travel between -- the northeastern waterfront plain, the
-Mission/SoMa flats, the Sunset, the Richmond, the Bayview flats, and so on.
+people actually travel between -- in Zurich, the floor of the Limmat valley
+(lakeshore, City, Aussersihl, Altstetten) and the floor of the Glatt valley
+(Oerlikon, Seebach, Schwamendingen) on the far side of the Käferberg-
+Zürichberg ridge.
 The pass tree over those basins then answers, for every pair of flat
 districts, how much climbing is geometrically unavoidable and exactly which
 block you must climb it on.
@@ -40,7 +42,7 @@ import pandas as pd
 from .config import OUTPUT_DIR
 from .utils import get_logger, step
 
-log = get_logger("sf_flat_routes.passes")
+log = get_logger("zrh_flat_routes.passes")
 
 PASSES_GEOJSON = OUTPUT_DIR / "passes.geojson"
 PASSES_CSV = OUTPUT_DIR / "passes.csv"
@@ -48,12 +50,15 @@ BARRIERS_GEOJSON = OUTPUT_DIR / "barriers.geojson"
 BARRIERS_CSV = OUTPUT_DIR / "barriers.csv"
 BASINS_GEOJSON = OUTPUT_DIR / "lowland_basins.geojson"
 
-#: Elevation (m) below which street is considered "lowland" when delineating
-#: basins.  25 m was tried first and proved too generous: the 25 m contour
-#: links the Mission, SoMa, the northeastern waterfront and the Bayview into
-#: a single 817 km "basin", which says nothing useful.  15 m separates the
-#: real flat districts while still following the valley floors.
-BASIN_ELEV_M = 15.0
+#: Elevation (m above sea level) below which street is considered "lowland"
+#: when delineating basins.  Upstream used 15 m in San Francisco, i.e. 15 m
+#: above the bay.  Zurich's floor is the lake (406 m) and the Limmat, which
+#: leaves the city at 392 m, but its second valley, the Glatt's, lies at
+#: 430-440 m.  Below 430 m the Glatt valley is two disconnected pieces;
+#: 440 m joins them while keeping them apart from the Limmat valley, so the
+#: two valley floors come out as the two basins they are; by 450 m the
+#: lower slopes of Höngg and Affoltern start to join in.
+BASIN_ELEV_M = 440.0
 #: A basin must contain at least this much street to count as a district.
 BASIN_MIN_KM = 2.0
 
@@ -246,7 +251,6 @@ def describe_passes(passes: pd.DataFrame, edges, neighborhoods,
     j = gpd.sjoin(pt, neighborhoods[["neighborhood", "geometry"]], how="left",
                   predicate="within")
     gdf["neighborhood"] = j["neighborhood"].to_numpy()[:len(gdf)]
-    gdf["pass_elev_ft"] = gdf["pass_elev_m"] * 3.28084
     return gdf.sort_values("pass_elev_m").reset_index(drop=True)
 
 
@@ -352,8 +356,7 @@ def neighborhood_pass_matrix(tree, points: pd.DataFrame):
                     continue
                 h, e = r
                 rows.append({"neighborhood_a": names[i], "neighborhood_b": names[j],
-                             "pass_elev_m": h, "pass_elev_ft": h * 3.28084,
-                             "pass_edge_id": e})
+                             "pass_elev_m": h, "pass_edge_id": e})
     return pd.DataFrame(rows)
 
 
@@ -361,7 +364,7 @@ def rank_critical_passes(pass_matrix: pd.DataFrame, edges, neighborhoods):
     """Aggregate the pass matrix onto edges: the city's true saddles.
 
     An edge that is the binding constraint for many neighborhood pairs is a
-    pass that San Francisco's topography genuinely forces traffic over.
+    pass that Zurich's topography genuinely forces traffic over.
     """
     import geopandas as gpd
 
@@ -384,7 +387,6 @@ def rank_critical_passes(pass_matrix: pd.DataFrame, edges, neighborhoods):
     cols = [c for c in ["name", "cls", "length_m", "max_abs_grade", "elev_min",
                         "elev_max", "geometry"] if c in e.columns]
     agg = agg.join(e[cols], on="edge_id")
-    agg["pass_elev_ft"] = agg["pass_elev_m"] * 3.28084
     gdf = gpd.GeoDataFrame(agg, geometry="geometry", crs=edges.crs)
     mid = gdf.geometry.interpolate(0.5, normalized=True)
     j = gpd.sjoin(gpd.GeoDataFrame(geometry=mid.values, crs=edges.crs),

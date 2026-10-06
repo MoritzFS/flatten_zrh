@@ -1,14 +1,14 @@
 """Command-line interface.
 
-    python -m sf_flat_routes sources        # dataset provenance table
-    python -m sf_flat_routes download       # fetch and cache all source data
-    python -m sf_flat_routes build-network   # street graph + elevation + metrics
-    python -m sf_flat_routes analyze        # pairs, Pareto, corridors, passes
-    python -m sf_flat_routes validate       # checks against known ground truth
-    python -m sf_flat_routes map            # interactive + static maps
-    python -m sf_flat_routes report         # written analysis of the findings
-    python -m sf_flat_routes all            # everything, in order
-    python -m sf_flat_routes route --from Mission --to "Outer Sunset"
+    python -m zrh_flat_routes sources        # dataset provenance table
+    python -m zrh_flat_routes download       # fetch and cache all source data
+    python -m zrh_flat_routes build-network   # street graph + elevation + metrics
+    python -m zrh_flat_routes analyze        # pairs, Pareto, corridors, passes
+    python -m zrh_flat_routes validate       # checks against known ground truth
+    python -m zrh_flat_routes map            # interactive + static maps
+    python -m zrh_flat_routes report         # written analysis of the findings
+    python -m zrh_flat_routes all            # everything, in order
+    python -m zrh_flat_routes route --from Langstrasse --to Witikon
 
 Every stage caches its output, so re-running is cheap; pass ``--force`` to
 recompute a stage from scratch.
@@ -21,7 +21,7 @@ import sys
 from . import sources
 from .utils import get_logger, setup_logging, step
 
-log = get_logger("sf_flat_routes")
+log = get_logger("zrh_flat_routes")
 
 
 def _add_common(p: argparse.ArgumentParser) -> None:
@@ -32,9 +32,9 @@ def _add_common(p: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="python -m sf_flat_routes",
-        description="San Francisco flat-route analysis: discovering the "
-                    "city's low-elevation street network.",
+        prog="python -m zrh_flat_routes",
+        description="Zurich flat-route analysis: discovering the city's "
+                    "low-elevation street network (a port of flattensf).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -44,7 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("download", "download and cache every source dataset"),
         ("build-network", "build the street graph, sample elevation, "
                           "compute edge metrics"),
-        ("analyze", "neighborhood pairs, Pareto fronts, corridors, passes"),
+        ("analyze", "quarter pairs, Pareto fronts, corridors, passes"),
         ("validate", "validate the model against known ground truth"),
         ("map", "render the interactive and static maps"),
         ("report", "write the analysis of major findings"),
@@ -62,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(sm)
     sm.add_argument("--tag", required=True)
 
-    rp = sub.add_parser("route", help="route between two neighborhoods")
+    rp = sub.add_parser("route", help="route between two statistical quarters")
     _add_common(rp)
     rp.add_argument("--from", dest="origin", required=True)
     rp.add_argument("--to", dest="dest", required=True)
@@ -155,12 +155,12 @@ def cmd_route(args) -> int:
                    ctx.points[args.mode]["node"]))
     for name in (args.origin, args.dest):
         if name not in pts:
-            print(f"unknown neighborhood {name!r}. Available:\n  "
+            print(f"unknown quarter {name!r}. Available:\n  "
                   + "\n  ".join(sorted(pts)), file=sys.stderr)
             return 2
     names = [args.profile] if args.profile else list(ROUTING_PROFILES)
     print(f"\n{args.origin}  ->  {args.dest}   [{args.mode}]")
-    print(f"{'objective':14s} {'miles':>7s} {'climb ft':>9s} {'loss ft':>8s} "
+    print(f"{'objective':14s} {'km':>7s} {'climb m':>9s} {'loss m':>8s} "
           f"{'max %':>6s} {'>5% m':>7s} {'>8% m':>7s} {'vs shortest':>22s}")
     base = None
     for pname in names:
@@ -172,9 +172,9 @@ def cmd_route(args) -> int:
         if pname != "shortest" and base:
             dd = 100 * (s["distance_m"] / base["distance_m"] - 1)
             dg = base["elev_gain_m"] - s["elev_gain_m"]
-            cmp_ = f"{dd:+5.0f}% dist, {dg*3.28084:+6.0f} ft climb"
-        print(f"{pname:14s} {s['distance_m']/1609.344:7.2f} "
-              f"{s['elev_gain_m']*3.28084:9.0f} {s['elev_loss_m']*3.28084:8.0f} "
+            cmp_ = f"{dd:+5.0f}% dist, {-dg:+6.0f} m climb"
+        print(f"{pname:14s} {s['distance_m']/1000:7.2f} "
+              f"{s['elev_gain_m']:9.0f} {s['elev_loss_m']:8.0f} "
               f"{s['max_grade']*100:6.1f} {s['d_above_5']:7.0f} "
               f"{s['d_above_8']:7.0f} {cmp_:>22s}")
     print()

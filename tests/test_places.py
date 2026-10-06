@@ -5,9 +5,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sf_flat_routes import places
-from sf_flat_routes.config import SF_BBOX
-from sf_flat_routes.download import ADDRESSES_PARQUET, BASE_PARQUETS, PLACES_PARQUET
+from zrh_flat_routes import places
+from zrh_flat_routes.config import STUDY_BBOX
+from zrh_flat_routes.download import ADDRESSES_PARQUET, BASE_PARQUETS, PLACES_PARQUET
 
 
 def test_street_names_are_title_cased_with_suffixes_kept_short():
@@ -76,8 +76,8 @@ def test_place_index_is_compact_and_inside_the_city(index):
     assert 5000 < n < 20000
     assert len(index["group"]) == n == len(index["lon"]) == len(index["lat"])
     assert max(index["group"]) < len(index["groups"])
-    assert min(index["lon"]) >= SF_BBOX[0] and max(index["lon"]) <= SF_BBOX[1]
-    assert min(index["lat"]) >= SF_BBOX[2] and max(index["lat"]) <= SF_BBOX[3]
+    assert min(index["lon"]) >= STUDY_BBOX[0] and max(index["lon"]) <= STUDY_BBOX[1]
+    assert min(index["lat"]) >= STUDY_BBOX[2] and max(index["lat"]) <= STUDY_BBOX[3]
     assert len(set(index["names"])) == n or len(set(zip(index["names"], index["group"]))) == n
 
 
@@ -114,6 +114,6 @@ def test_addresses_pack_into_sorted_uint16_offsets():
     assert np.all(np.diff(key) > 0)
     lon = a["origin"][0] + a["lon"] * 1e-5
     lat = a["origin"][1] + a["lat"] * 1e-5
-    assert lon.min() >= SF_BBOX[0] and lon.max() <= SF_BBOX[1] + 1e-4
-    assert lat.min() >= SF_BBOX[2] and lat.max() <= SF_BBOX[3] + 1e-4
+    assert lon.min() >= STUDY_BBOX[0] and lon.max() <= STUDY_BBOX[1] + 1e-4
+    assert lat.min() >= STUDY_BBOX[2] and lat.max() <= STUDY_BBOX[3] + 1e-4
     assert "Valencia St" in a["streets"]

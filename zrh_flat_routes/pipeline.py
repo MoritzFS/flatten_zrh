@@ -7,7 +7,7 @@ import pandas as pd
 
 from .utils import configure_gdal_for_proxy, get_logger, step
 
-log = get_logger("sf_flat_routes.pipeline")
+log = get_logger("zrh_flat_routes.pipeline")
 
 
 @dataclass

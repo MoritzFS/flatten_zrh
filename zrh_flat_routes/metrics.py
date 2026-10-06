@@ -15,7 +15,8 @@ Definitions
     climb is never shortened, because pruning only ever removes interior
     wiggles and never moves the endpoints.  The latter property matters: an
     earlier backlash-operator implementation charged one dead-band per edge
-    and so under-reported long climbs by up to 17 m over Twin Peaks.
+    and so under-reported long climbs by up to 17 m over San Francisco's
+    Twin Peaks, upstream.
 
     The filter runs **once**, in the geometric direction of the edge, and the
     reverse direction's gain is *defined* as the forward direction's loss.
@@ -28,8 +29,8 @@ Definitions
 
 ``max_grade``
     Steepest single sampled interval *in the direction of travel* (positive
-    = climbing).  Clipped at 60% to reject DEM artefacts; the steepest
-    drivable street in San Francisco is about 31.5%.
+    = climbing).  Clipped at 60% to reject DEM artefacts; Zurich's steepest
+    streets are in the 15-25% range.
 
 ``p95_grade``
     Length-weighted 95th percentile of the signed interval grade -- a
@@ -53,12 +54,12 @@ from .config import (ELEVATION, GRADE_PERCENTILE, GRADE_THRESHOLDS,
                      MIN_RELIABLE_GRADE_LENGTH_M, PROCESSED_DIR)
 from .utils import get_logger, progress, step
 
-log = get_logger("sf_flat_routes.metrics")
+log = get_logger("zrh_flat_routes.metrics")
 
 DIRECTED_PARQUET = PROCESSED_DIR / "edges_directed.parquet"
 UNDIRECTED_PARQUET = PROCESSED_DIR / "edges_metrics.parquet"
 #: GeoPackage mirror of the processed network, for use in desktop GIS.
-NETWORK_GPKG = PROCESSED_DIR / "sf_street_network.gpkg"
+NETWORK_GPKG = PROCESSED_DIR / "zrh_street_network.gpkg"
 
 
 # --------------------------------------------------------------------------
@@ -118,8 +119,8 @@ def prune_reversals(z: np.ndarray, deadband: float) -> list[float]:
     sustained climb: a clean 100 m climb returns exactly 100 m, whether it is
     measured in one piece or split across fifty consecutive edges.  The
     backlash operator loses one dead-band per edge, which systematically
-    under-reported long climbs -- on a route over Twin Peaks the error reached
-    17 m.  Endpoints are never removed, so gain minus loss always equals the
+    under-reported long climbs -- upstream, on a route over San Francisco's
+    Twin Peaks, the error reached 17 m.  Endpoints are never removed, so gain minus loss always equals the
     true net elevation change.
     """
     z = np.asarray(z, dtype="float64")
@@ -387,7 +388,7 @@ def _rectify_by_segment(edges, profiles: dict) -> dict[int, np.ndarray]:
     continuous climb is spread over many edges.  Applying the dead-band to
     each edge separately restarts the filter constantly, which is how the
     earlier implementation lost up to 17 m of real climbing on a route over
-    Twin Peaks.  Rectifying the concatenated segment profile and then slicing
+    San Francisco's Twin Peaks, upstream.  Rectifying the concatenated segment profile and then slicing
     it keeps the filter's noise rejection while making per-edge gains sum
     correctly along the street.
     """

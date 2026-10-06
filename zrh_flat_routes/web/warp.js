@@ -1,6 +1,6 @@
 /* The warped city.
  *
- * Geography answers "how far", and in San Francisco that is the wrong
+ * Geography answers "how far", and in a hilly city that is the wrong
  * question. Here the city is redrawn so that distance on the page means
  * *climbing cost*: the equivalent-metre cost the router charges, in which a
  * metre of ascent counts as some multiple of a metre of walking. Places
@@ -8,14 +8,16 @@
  * together. The multiple is the viewer's to set, and the same weights drive
  * the routes, so the picture and the directions always agree.
  *
- * Method, in brief: ~100 anchor intersections (every neighborhood's access
+ * Method, in brief: ~100 anchor intersections (every quarter's access
  * point plus a lattice over the city) get a full cost matrix from the
  * in-page router; stress majorisation (SMACOF, unit weights) lays them out
  * so page distance matches cost, starting from their true positions so the
  * result is the least deformation that fits; a Procrustes fit turns and
  * scales the layout back onto geography so north stays up; and a thin-plate
  * spline through the anchors' displacements carries every street vertex,
- * neighborhood outline and route along for the ride.
+ * quarter outline and route along for the ride.
+ *
+ * Ported unchanged in method from flattensf (Drew Edwards, MIT licence).
  */
 "use strict";
 
@@ -30,7 +32,7 @@ const Warp = {
   },
 
   /* ----------------------------------------------------- anchor selection */
-  /* Neighborhood access points plus a lattice of routable intersections. */
+  /* Quarter access points plus a lattice of routable intersections. */
   anchors(app, mode, cellM = 1000) {
     const g = app.graph, bit = g.modeBit(mode);
     const ok = i => (g.nodeFlags[i] & bit) !== 0;

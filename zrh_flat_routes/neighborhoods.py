@@ -1,10 +1,14 @@
-"""Neighborhood boundaries, city boundary and representative access points.
+"""Quarter boundaries, city boundary and representative access points.
 
-Choosing an origin/destination point per neighborhood matters more than it
-looks.  A polygon centroid can easily land in the middle of a park, on a
-hillside with no street, in the water, or (for a concave neighborhood like
-the Presidio or Lakeshore) outside the neighborhood altogether.  Routing from
-such a point produces garbage distances.
+Zurich's 34 statistical quarters (Statistische Quartiere) play the part San
+Francisco's neighborhoods play upstream; the code keeps the word
+"neighborhood" for them throughout.
+
+Choosing an origin/destination point per quarter matters more than it
+looks.  A polygon centroid can easily land in the middle of a forest, on a
+hillside with no street, in the lake (Enge, Seefeld and Wollishofen run out
+into it), or outside a concave quarter altogether.  Routing from such a
+point produces garbage distances.
 
 The representative point is therefore chosen as follows:
 
@@ -34,7 +38,7 @@ from .config import (ANALYSIS, CRS_PROJECTED, EXCLUDED_NEIGHBORHOODS,
 from .download import NEIGHBORHOODS_GEOJSON
 from .utils import get_logger, step
 
-log = get_logger("sf_flat_routes.neighborhoods")
+log = get_logger("zrh_flat_routes.neighborhoods")
 
 NEIGHBORHOODS_GPKG = PROCESSED_DIR / "neighborhoods.gpkg"
 POINTS_GPKG = PROCESSED_DIR / "neighborhood_points.gpkg"
@@ -53,8 +57,12 @@ def load_neighborhoods(path: Path = NEIGHBORHOODS_GEOJSON, force: bool = False):
         return gpd.read_file(NEIGHBORHOODS_GPKG)
 
     gdf = gpd.read_file(path)
-    gdf = gdf.rename(columns={"name": "neighborhood"})
-    gdf = gdf[["neighborhood", "geometry"]].copy()
+    # The City's layer names each statistical quarter ``qname`` and its
+    # district (Kreis) ``kname``.
+    gdf = gdf.rename(columns={"qname": "neighborhood", "kname": "district"})
+    if gdf.crs is None:
+        gdf = gdf.set_crs(CRS_PROJECTED)
+    gdf = gdf[["neighborhood", "district", "geometry"]].copy()
     gdf = gdf.to_crs(CRS_PROJECTED)
     gdf["geometry"] = gdf.geometry.buffer(0)          # repair any self-touching rings
     gdf["area_km2"] = gdf.geometry.area / 1e6
@@ -78,7 +86,7 @@ def city_boundary(neighborhoods=None, buffer_m: float = 250.0):
 
 
 def analysis_neighborhoods(neighborhoods=None):
-    """Neighborhoods used for pair analysis (excludes unreachable islands)."""
+    """Quarters used for pair analysis (all of them, in Zurich)."""
     nb = load_neighborhoods() if neighborhoods is None else neighborhoods
     return nb[~nb["neighborhood"].isin(EXCLUDED_NEIGHBORHOODS)].reset_index(drop=True)
 
@@ -111,8 +119,9 @@ def choose_representative_points(edges, neighborhoods=None, mode: str = "walk",
 
     ``valid_nodes`` restricts candidates to nodes that are actually routable
     for this mode (the largest strongly connected component of the mode's
-    graph).  Without it a neighborhood such as the Presidio can be handed a
-    node that exists only on a footpath, which is unreachable by bicycle.
+    graph).  Without it a quarter whose centre is forest, such as
+    Friesenberg on the slope of the Uetliberg, can be handed a node that
+    exists only on a footpath, which is unreachable by bicycle.
     """
     import geopandas as gpd
     from shapely.geometry import Point

@@ -1,4 +1,4 @@
-"""Discovery of San Francisco's low-elevation corridors.
+"""Discovery of Zurich's low-elevation corridors.
 
 The question is not "which streets are flat" -- thousands are -- but "which
 flat streets does the city's geography force low-gradient traffic onto".  A
@@ -7,7 +7,7 @@ between different parts of the city, and by saving climbing when it is used.
 
 Importance score
 ----------------
-For each undirected edge we accumulate, over every ordered neighborhood pair
+For each undirected edge we accumulate, over every ordered quarter pair
 and every climb-averse objective:
 
 ``pair_count``
@@ -60,7 +60,7 @@ import pandas as pd
 from .config import ANALYSIS, OUTPUT_DIR, PROCESSED_DIR
 from .utils import get_logger, progress, step
 
-log = get_logger("sf_flat_routes.corridors")
+log = get_logger("zrh_flat_routes.corridors")
 
 EDGE_SCORES_PARQUET = PROCESSED_DIR / "edge_corridor_scores.parquet"
 CORRIDORS_GEOJSON = OUTPUT_DIR / "flat_corridors.geojson"
