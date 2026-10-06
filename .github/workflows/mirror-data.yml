@@ -54,3 +54,10 @@ jobs:
               --notes "Unmodified copies of swisstopo swissALTI3D (2 m) tiles covering Zurich and the City of Zurich statistical quarters, for build environments that cannot reach the publishers. swissALTI3D: Source: Federal Office of Topography swisstopo. Quarters: Stadt Zürich Open Government Data. See provenance.tar.gz for URLs, dates, checksums and licence terms."
           fi
           gh release upload source-data $files --clobber
+          gh release edit source-data --notes "Copies of source data for build environments that cannot reach the publishers. Fetched by .github/workflows/mirror-data.yml; provenance.tar.gz records every URL, retrieval date and checksum, with the publishers' licence pages.
+
+          - swissalti3d_2m_zurich.tar: swissALTI3D 2 m tiles covering Zurich, unmodified. Source: Federal Office of Topography swisstopo.
+          - dhm25_zurich_lv03.tif: DHM25 matrix model, cut to a window around Zurich. Source: Federal Office of Topography swisstopo.
+          - swisstopo_addresses_zurich.csv: official directory of building addresses, rows inside the study area. Source: Federal Office of Topography swisstopo.
+          - stadtzh_boundaries.tar.gz: statistical quarters and districts of the City of Zurich (Stadt Zürich, Open Data Zürich, CC0).
+          - osm_incline_zurich.json: OpenStreetMap ways with an incline tag. © OpenStreetMap contributors, ODbL 1.0."
