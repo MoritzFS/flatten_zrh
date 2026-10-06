@@ -7,6 +7,8 @@
 # publishers' own, unmodified, except DHM25, which is cut from the national
 # grid to a window around Zurich; provenance.tar.gz records where and when
 # each was fetched, with checksums and the licence pages in force at the time.
+# swisstopo's building-address register is likewise cut from the national
+# file to the rows inside the study area.
 name: Mirror source data
 
 on:
@@ -45,7 +47,7 @@ jobs:
         run: |
           ls -la mirror
           files="mirror/provenance.tar.gz mirror/stadtzh_boundaries.tar.gz"
-          for f in mirror/swissalti3d_*.tar mirror/dhm25_*.tif mirror/osm_incline_*.json; do [ -f "$f" ] && files="$files $f"; done
+          for f in mirror/swissalti3d_*.tar mirror/dhm25_*.tif mirror/osm_incline_*.json mirror/swisstopo_addresses_*.csv; do [ -f "$f" ] && files="$files $f"; done
           if ! gh release view source-data >/dev/null 2>&1; then
             gh release create source-data --target "$GITHUB_SHA" --prerelease \
               --title "Source data mirror" \

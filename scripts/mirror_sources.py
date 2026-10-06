@@ -251,6 +251,61 @@ def mirror_osm_incline(out: Path) -> None:
     raise RuntimeError(f"no Overpass endpoint answered: {last}")
 
 
+#: swisstopo's official directory of building addresses (OGD). Distributed
+#: for the whole country; the mirror keeps the rows inside the study area.
+ADDRESS_COLLECTION = "ch.swisstopo.amtliches-gebaeudeadressverzeichnis"
+#: The study area in LV95 (EPSG:2056 metres: xmin, ymin, xmax, ymax).
+LV95_WINDOW = (2673000, 1238000, 2692000, 1257000)
+
+
+def mirror_addresses(out: Path) -> None:
+    import csv
+    import io
+    import zipfile
+
+    r = SESSION.get(f"{STAC}/collections/{ADDRESS_COLLECTION}/items", timeout=120)
+    r.raise_for_status()
+    items = r.json()["features"]
+    (out / "provenance").mkdir(parents=True, exist_ok=True)
+    (out / "provenance" / "stac_addresses_items.json").write_text(json.dumps(items, indent=1))
+    fetch(f"{STAC}/collections/{ADDRESS_COLLECTION}",
+          out / "provenance" / "stac_addresses.json")
+    assets = [(k, a) for it in items for k, a in it.get("assets", {}).items()]
+    print(f"  assets: {[k for k, _ in assets]}", flush=True)
+    key, asset = next((k, a) for k, a in assets
+                      if "csv" in k.lower() and "2056" in k)
+    z = out / "addresses" / key
+    fetch(asset["href"], z)
+    with zipfile.ZipFile(z) as zf:
+        member = next(n for n in zf.namelist() if n.lower().endswith(".csv"))
+        print(f"  {key}: members {zf.namelist()}", flush=True)
+        with zf.open(member) as fh:
+            text = io.TextIOWrapper(fh, encoding="utf-8-sig", newline="")
+            sample = text.readline()
+            delim = ";" if sample.count(";") > sample.count(",") else ","
+            header = next(csv.reader([sample], delimiter=delim))
+            print(f"  columns: {header}", flush=True)
+            ix = {c.upper(): i for i, c in enumerate(header)}
+            ex = next(ix[c] for c in ("ADR_EASTING", "GKODE", "E", "EASTING") if c in ix)
+            nx = next(ix[c] for c in ("ADR_NORTHING", "GKODN", "N", "NORTHING") if c in ix)
+            dest = out / "swisstopo_addresses_zurich.csv"
+            kept = 0
+            with open(dest, "w", encoding="utf-8", newline="") as fo:
+                w = csv.writer(fo, delimiter=delim)
+                w.writerow(header)
+                for row in csv.reader(text, delimiter=delim):
+                    try:
+                        e, n = float(row[ex]), float(row[nx])
+                    except (ValueError, IndexError):
+                        continue
+                    if (LV95_WINDOW[0] <= e <= LV95_WINDOW[2]
+                            and LV95_WINDOW[1] <= n <= LV95_WINDOW[3]):
+                        w.writerow(row)
+                        kept += 1
+    print(f"  kept {kept} addresses in the study area", flush=True)
+    z.unlink()
+
+
 def mirror_pages(out: Path) -> None:
     for fname, url in PAGES.items():
         try:
@@ -270,6 +325,7 @@ def main() -> int:
         guarded("swissALTI3D", mirror_swissalti3d, out)
     guarded("DHM25", mirror_dhm25, out)
     guarded("OpenStreetMap incline tags", mirror_osm_incline, out)
+    guarded("swisstopo building addresses", mirror_addresses, out)
     (out / "provenance").mkdir(exist_ok=True)
     (out / "provenance" / "manifest.json").write_text(json.dumps(MANIFEST, indent=1))
     with tarfile.open(out / "stadtzh_boundaries.tar.gz", "w:gz") as tf:
