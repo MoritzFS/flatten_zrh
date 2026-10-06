@@ -1,0 +1,94 @@
+MIT License
+
+Copyright (c) 2026 flatten_zrh contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+This project is a port to Zurich of flattensf (Flatten SF) by Drew Edwards,
+https://github.com/almostimplemented/flattensf, and most of its code is
+upstream's. That code is used under the following licence, reproduced here
+as it requires:
+
+MIT License
+
+Copyright (c) 2026 sf-flat-routes contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+NOTE ON DATA. These licences cover the code only. Data consumed and
+redistributed by this project carries its own terms (all verified
+2026-10-06; the publishers' licence pages as fetched are kept in
+provenance.tar.gz in this repository's source-data release):
+
+  * Street geometry and attributes derive from OpenStreetMap via Overture
+    Maps and are (c) OpenStreetMap contributors, licensed ODbL 1.0
+    (https://opendatacommons.org/licenses/odbl/1-0/); a few hundred of the
+    Overture records come from TomTom, also under ODbL 1.0. Derived street
+    geometry in this repository -- including outputs/*.geojson,
+    outputs/flat_corridors.*, outputs/*.csv, data/processed/edges_*.parquet,
+    the interactive HTML maps and site/data/graph-*.bin.gz -- is a Derived
+    Database under the ODbL and carries its share-alike obligations: it is
+    made available under the ODbL 1.0, and the code that produces it from
+    the sources is in this repository. The place search's mapped features
+    (Overture base theme) and the OpenStreetMap incline tags used in
+    validation are likewise (c) OpenStreetMap contributors, ODbL 1.0.
+  * Elevation is swissALTI3D (and, for validation only, DHM25), (c) Federal
+    Office of Topography swisstopo, used under swisstopo's terms of use for
+    free geodata and geoservices (OGD): use, redistribution, processing and
+    commercial use are permitted, and a source reference is mandatory. This
+    project's source reference is "Federal Office of Topography swisstopo"
+    (or "(c) swisstopo"), given on the site, on the static maps and in the
+    README. Derived elevations (edge profiles, gradients, the hillshade) are
+    "derived from swissALTI3D, Federal Office of Topography swisstopo".
+  * Street addresses in the route finder's search come from the Official
+    directory of building addresses (Amtliches Verzeichnis der
+    Gebaeudeadressen), (c) Federal Office of Topography swisstopo, under the
+    same OGD terms; opendata.swiss lists it as "Open use".
+  * The statistical quarters (Statistische Quartiere) are published by the
+    City of Zurich (Statistik Stadt Zuerich and the GIS-Zentrum, Geomatik +
+    Vermessung) on data.stadt-zuerich.ch under Creative Commons CC0 1.0;
+    no attribution is required, and the City is credited anyway.
+  * Points of interest in the place search come from Overture Maps places,
+    licensed CDLA Permissive 2.0 (https://cdla.dev/permissive-2-0/) for the
+    Meta, Microsoft, PinMeTo and DAC records and CC0 1.0 for AllThePlaces.
+    Overture's Foursquare records, licensed Apache 2.0, are left out.
+  * zrh_flat_routes/vendor/ and site/leaflet-*.{js,css} contain Leaflet
+    1.9.4, (c) 2010-2023 Vladimir Agafonkin, (c) 2010-2011 CloudMade,
+    licensed BSD-2-Clause; its notice is in the vendored files and in
+    zrh_flat_routes/vendor/README.md.

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Flatten Zürich</title>
+<meta name="description" content="Flatten Zürich: the flattest walking or cycling route between any two places in Zürich, and every route between it and the shortest one. A port of Flatten SF by Drew Edwards.">
+<!--__HEAD_EXTRA__-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>/*__LEAFLET_CSS__*/</style>
+<style>/*__APP_CSS__*/</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="credit" id="credit">Zürich port by <a href="https://github.com/MoritzFS" rel="author">MoritzFS</a> &middot; after <a href="/*__UPSTREAM_SITE__*/">Flatten SF</a> by <a href="https://almostimplemented.com">Drew Edwards</a></div>
+<section id="card" aria-label="Flatten Zürich: plan a flat route">
+  <h1>Flatten Zürich <small>flat routes across Zürich</small></h1>
+  <div class="row">
+    <div class="field">
+      <label for="from">From</label>
+      <input id="from" type="text" autocomplete="off" spellcheck="false" placeholder="Address, place, or Langstrasse & Josefstrasse">
+      <span class="pin" aria-hidden="true"></span>
+      <ul class="suggest" id="from_s" role="listbox" hidden></ul>
+    </div>
+    <button class="swap" id="swap" title="Swap" aria-label="Swap origin and destination">&#8645;</button>
+  </div>
+  <div class="row">
+    <div class="field">
+      <label for="to">To</label>
+      <input id="to" type="text" autocomplete="off" spellcheck="false" placeholder="Or click the map">
+      <span class="pin to" aria-hidden="true"></span>
+      <ul class="suggest" id="to_s" role="listbox" hidden></ul>
+    </div>
+    <div class="seg" id="mode" role="group" aria-label="Travel mode">
+      <button data-v="walk" aria-pressed="true">Walk</button>
+      <button data-v="bike" aria-pressed="false">Bike</button>
+    </div>
+  </div>
+  <div class="statusrow">
+    <div class="status" id="status"></div>
+    <button class="link" id="share" type="button" hidden>Copy link</button>
+  </div>
+  <input id="sharebox" type="text" readonly hidden aria-label="Link to this route">
+  <div class="slider">
+    <input type="range" id="sl" min="0" max="1" step="0.001" value="1" aria-label="From shortest to flattest">
+    <div class="ends"><span>Shortest</span><b id="slpos"></b><span>Flattest</span></div>
+  </div>
+  <div class="result" id="result" hidden>
+    <div class="stat"><div class="v" id="v_dist"></div><div class="k">distance</div></div>
+    <div class="stat"><div class="v" id="v_climb"></div><div class="k">climbing</div></div>
+    <div class="stat"><div class="v" id="v_grade"></div><div class="k">steepest</div></div>
+  </div>
+  <div class="delta" id="delta"></div>
+  <div class="turns" id="turns" hidden></div>
+  <canvas id="prof" width="760" height="184" hidden></canvas>
+  <details>
+    <summary>How this works</summary>
+    <p class="fine">Routes are computed in your browser over /*__N_ARCS__*/
+    street segments, using swisstopo's swissALTI3D 2&nbsp;m terrain model
+    and the Overture / OpenStreetMap street graph. The slider runs along the
+    whole trade-off between distance and climbing: every route that nothing
+    else beats on both counts, from the shortest path to the flattest one
+    worth walking (where a metre of climb costs 200&nbsp;m of walking;
+    beyond that the routes stop being routes). Sliding right never shortens
+    the route and never adds climbing. Climbing is cumulative gain, not the
+    net difference between the endpoints. Stairways are allowed on foot and
+    excluded on a bike, as are footpaths and pedestrian zones not signed for
+    bikes. Faint lines show the other routes along the way. Place search is
+    offline: street intersections, places and addresses for Zürich are built
+    into this page.
+    <a href="/*__REPO_URL__*/">Source, data and the full analysis</a>.</p>
+    <p class="fine">This is a Zürich port of <a href="/*__UPSTREAM_SITE__*/">Flatten SF</a>
+    by <a href="https://almostimplemented.com">Drew Edwards</a>
+    (<a href="/*__UPSTREAM_URL__*/">source</a>, MIT licence): the method, the
+    router and this page are theirs. Data: streets &copy;&nbsp;OpenStreetMap
+    contributors (ODbL) via Overture Maps; elevation and addresses: Federal
+    Office of Topography swisstopo; quarters: Stadt Zürich Open Data.</p>
+  </details>
+  <p class="credit-inline">Zürich port by <a href="https://github.com/MoritzFS" rel="author">MoritzFS</a> &middot; after <a href="/*__UPSTREAM_SITE__*/">Flatten SF</a> by <a href="https://almostimplemented.com">Drew Edwards</a></p>
+</section>
+<script>/*__LEAFLET_JS__*/</script>
+<script>window.DATA = /*__DATA__*/;</script>
+<script>/*__APP_JS__*/</script>
+</body>
+</html>

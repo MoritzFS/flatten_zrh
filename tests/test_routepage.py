@@ -1,0 +1,303 @@
+"""End-to-end test of the route page (the shareable map).
+
+Drives ``outputs/zrh_flat_route_finder.html`` in a headless browser: the page
+must load without errors, route its default trip, answer searches for an
+intersection, an address and a park, and produce a route family whose ends
+are what the slider labels promise -- the left end is the true shortest
+path and the right end has the least climbing. One member is also checked
+against Python under the same scaled weights, so the slider positions
+cannot drift from the analysis.
+
+Skipped unless Playwright, a Chromium build and a built page are present.
+"""
+from __future__ import annotations
+
+import glob
+import os
+
+import pytest
+
+from zrh_flat_routes.config import PROCESSED_DIR
+from zrh_flat_routes.viz_interactive import SIMPLE_HTML, SITE_INDEX
+
+playwright = pytest.importorskip("playwright.sync_api",
+                                 reason="playwright is not installed")
+
+
+def _chromium() -> str | None:
+    for pattern in ("/opt/pw-browsers/chromium-*/chrome-linux/chrome",
+                    os.path.expanduser(
+                        "~/.cache/ms-playwright/chromium-*/chrome-linux/chrome")):
+        hits = sorted(glob.glob(pattern))
+        if hits:
+            return hits[-1]
+    return None
+
+
+pytestmark = [
+    pytest.mark.skipif(not SIMPLE_HTML.exists(),
+                       reason="route page not built; run `python -m zrh_flat_routes map`"),
+    pytest.mark.skipif(not (PROCESSED_DIR / "edges_directed.parquet").exists(),
+                       reason="processed data not built"),
+]
+
+_SEARCHES = ["langstrasse & josefstrasse", "josefstr und langstr", "bahnhofstrasse 12",
+             "12 bahnhofstrasse", "Bahnhofstraße 12a", "bellevue", "zuerich hb", "zurich hb",
+             "hoenggerstrasse", "lindenhof", "zürich oerlikon", "paradeplatz"]
+
+_SCRIPT = """(queries) => {
+    const fam = App.family, g = App.graph;
+    const alphas = [0, 14, 120];
+    const members = fam.unique.map(u => ({
+        id: u.id, distance_m: u.stats.distance_m, gain: u.stats.elev_gain_m,
+        arcs: u.arcs.map(a => [g.arcEdge[a], (g.arcFlags[a] & 4) ? 1 : 0]),
+        costs: alphas.map(a => g.pathCost(u.arcs, App.state.mode, App.weights(a))),
+    }));
+    const search = {};
+    for (const q of queries) search[q] = App.index.search(q).map(r => [r.name, r.kind]);
+    const sl = document.getElementById('sl');
+    sl.value = 0; sl.dispatchEvent(new Event('input'));
+    const atZero = App.shown.id;
+    sl.value = 1; sl.dispatchEvent(new Event('input'));
+    const atOne = App.shown.id;
+    sl.value = 0.5; sl.dispatchEvent(new Event('input'));
+    const half = App.shown.id;
+    return {
+        from: App.state.from, to: App.state.to, members, alphas,
+        search, atZero, atOne, half, hash: location.hash,
+        places: App.index.places.length, intersections: App.index.intersections.length,
+        hasAddresses: !!App.index.addr,
+        frontier: { solutions: App._search.solutions.length, labels: App._search.labels,
+                    expanded: App._search.expanded, truncated: App._search.truncated },
+        snap: (() => { const p = App.pointAt(8.565, 47.330); const g = App.graph;
+            return p ? { node: p.node, pinLon: p.lon, pinLat: p.lat,
+                         nodeLon: g.nodeLon(p.node), nodeLat: g.nodeLat(p.node) } : { node: -1 }; })(),
+    };
+}"""
+
+
+@pytest.fixture(scope="module")
+def page_results():
+    from playwright.sync_api import sync_playwright
+    errors: list = []
+    with sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch(executable_path=_chromium(),
+                                         args=["--no-sandbox", "--disable-gpu"])
+        except Exception as exc:                            # pragma: no cover
+            pytest.skip(f"no usable Chromium: {exc}")
+        page = browser.new_page(viewport={"width": 1280, "height": 800})
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.on("console", lambda m: errors.append(m.text)
+                if m.type == "error" and "fonts.g" not in m.text
+                and "ERR_" not in m.text else None)
+        page.goto(SIMPLE_HTML.resolve().as_uri(), wait_until="load", timeout=240_000)
+        page.wait_for_function(
+            "window.App && App.family && !App.family.partial"
+            " && !document.getElementById('result').hidden",
+            timeout=240_000)
+        out = page.evaluate(_SCRIPT, _SEARCHES)
+        # change the destination without touching the slider: the line on
+        # the map must be the new trip's, not the old one's
+        page.evaluate("""() => {
+            const hit = App.index.search('lindenhof')[0];
+            window._hit = hit;
+            App.setPoint('to', App.pointAt(hit.lon, hit.lat, hit.name), false);
+            App.recompute('auto');
+        }""")
+        page.wait_for_function("App.family && !App.family.partial", timeout=120_000)
+        out["retarget"] = page.evaluate("""() => {
+            const hit = window._hit, before = 0;
+            const u = App.shown, line = App._line.getLatLngs();
+            const end = line[line.length - 1];
+            return { before, after: line.length, sameAsShown: line.length === u.latlngs.length,
+                     member: App.family.unique.includes(u),
+                     endsAtTarget: Math.abs(end.lat - hit.lat) < 0.004 && Math.abs(end.lng - hit.lon) < 0.004 };
+        }""")
+        browser.close()
+    return out, errors
+
+
+def test_the_page_loads_and_routes_its_default_trip(page_results):
+    out, errors = page_results
+    assert not errors, errors[:4]
+    assert out["from"] and out["to"]
+    assert len(out["members"]) >= 2, "the default trip should offer a real choice"
+    f = out["frontier"]
+    assert f["solutions"] >= 2 and not f["truncated"], f
+    assert f["labels"] < 4_000_000, f
+
+
+def test_search_finds_intersections_addresses_and_places(page_results):
+    out, _ = page_results
+    s = out["search"]
+    assert out["intersections"] > 3000 and out["places"] > 5000 and out["hasAddresses"]
+    assert s["langstrasse & josefstrasse"][0] == ["Josefstrasse & Langstrasse", "intersection"]
+    assert s["josefstr und langstr"][0] == ["Josefstrasse & Langstrasse", "intersection"]
+    # Swiss address order, the other order, and the sharp s all reach it
+    assert s["bahnhofstrasse 12"][0] == ["Bahnhofstrasse 12", "address"]
+    assert s["12 bahnhofstrasse"][0] == ["Bahnhofstrasse 12", "address"]
+    assert s["Bahnhofstraße 12a"][0] == ["Bahnhofstrasse 12", "address"]
+    # tram stops outrank the POI feed's namesakes
+    assert s["bellevue"][0] == ["Bellevue", "tram/bus stop"]
+    assert s["paradeplatz"][0][0] == "Paradeplatz"
+    # umlauts fold: Zuerich, Zurich and Zürich are one word
+    assert s["zuerich hb"][0][0] == "Zürich HB"
+    assert s["zurich hb"][0][0] == "Zürich HB"
+    assert any("Hönggerstrasse" in n for n, _ in s["hoenggerstrasse"])
+    assert any(n == "Lindenhof" for n, _ in s["lindenhof"])
+    assert any(n == "Zürich Oerlikon" and k == "station" for n, k in s["zürich oerlikon"])
+
+
+def test_the_slider_ends_are_the_shortest_and_the_flattest(page_results):
+    out, _ = page_results
+    m = out["members"]
+    first, last = m[0], m[-1]
+    assert first["distance_m"] <= min(u["distance_m"] for u in m) + 1e-6
+    assert last["gain"] <= min(u["gain"] for u in m) + 1e-6
+    assert out["atZero"] == first["id"] and out["atOne"] == last["id"]
+    assert 0 < out["half"] < len(m) - 1
+    # the family is deduplicated: no two members share an arc sequence
+    seqs = [tuple(map(tuple, u["arcs"])) for u in m]
+    assert len(set(seqs)) == len(seqs)
+    # and no member is dominated by another on both counts
+    for a in m:
+        for b in m:
+            if a is b:
+                continue
+            assert not (b["distance_m"] <= a["distance_m"] - 1e-6
+                        and b["gain"] <= a["gain"] - 1e-6), (a, b)
+
+
+def test_the_family_is_monotone_in_distance_and_climbing(page_results):
+    """Sliding right never shortens the route and never adds climbing: the
+    defining property of a distance/climbing frontier sorted by distance,
+    and the behaviour the slider's end labels promise."""
+    out, _ = page_results
+    seq = out["members"]
+    for a, b in zip(seq, seq[1:]):
+        assert b["distance_m"] >= a["distance_m"] - 1e-6
+        assert b["gain"] <= a["gain"] + 1e-6
+
+
+def test_a_new_trip_replaces_the_drawn_route_at_once(page_results):
+    """Changing an endpoint redraws without the slider being touched."""
+    out, _ = page_results
+    r = out["retarget"]
+    assert r["member"] and r["sameAsShown"] and r["endsAtTarget"], r
+
+
+def test_a_click_in_the_lake_snaps_to_the_nearest_corner(page_results):
+    """The pin and the route start must agree, even for a click far
+    outside the street network."""
+    out, _ = page_results
+    r = out["snap"]
+    assert r["node"] >= 0
+    assert abs(r["pinLon"] - r["nodeLon"]) < 1e-9 and abs(r["pinLat"] - r["nodeLat"]) < 1e-9
+    # the middle of the lake, off Wollishofen, lands on the shore
+    assert 8.53 < r["nodeLon"] < 8.60 and 47.31 < r["nodeLat"] < 47.36
+
+
+def test_the_share_link_carries_the_trip(page_results):
+    out, _ = page_results
+    h = out["hash"]
+    # one bare token that survives any host or chat client
+    assert h.startswith("#t~") and "~0.500~" in h
+    assert all(c.isalnum() or c in "._~-" for c in h[1:]), h
+
+
+def test_the_frontier_contains_every_weighted_optimum(page_results):
+    """Every route a weighted sum length + alpha * climbing would choose is
+    a frontier point, so for each alpha the family's best member must cost
+    no more, under Python's own evaluation, than Python's route for that
+    alpha between the same two nodes. This pins the browser's frontier
+    search to the analysis's cost model."""
+    from zrh_flat_routes.config import ROUTING_PROFILES, with_alpha
+    from zrh_flat_routes.pipeline import build_context
+    from zrh_flat_routes.routing import route
+    from zrh_flat_routes.utils import configure_gdal_for_proxy
+
+    out, _ = page_results
+    configure_gdal_for_proxy()
+    ctx = build_context(modes=("walk",))
+    graph = ctx.graphs["walk"]
+    t = graph.table
+    key = {(int(e), d): i for i, (e, d) in enumerate(zip(t["edge_id"], t["direction"]))}
+    first = out["members"][0]
+    arcs0 = [key[(e, "rev" if r else "fwd")] for e, r in first["arcs"]]
+    src = t["from_node"].iloc[arcs0[0]]
+    dst = t["to_node"].iloc[arcs0[-1]]
+    for k, alpha in enumerate(out["alphas"]):
+        w = with_alpha(ROUTING_PROFILES["shortest"], alpha)
+        cost = graph.build_costs(w)
+        py_arcs, _ = route(graph, src, dst, w, arc_cost=cost)
+        py_cost = float(cost[py_arcs].sum())
+        best = min(out["members"], key=lambda u: u["costs"][k])
+        arcs = [key[(e, "rev" if r else "fwd")] for e, r in best["arcs"]]
+        js_cost = float(cost[arcs].sum())
+        # the search merges frontier points within 0.5 m of climbing and
+        # tolerates 10 cm per node inside; quantisation adds ~5 cm per arc
+        tol = alpha * (0.5 + 0.1 * len(arcs)) + 0.05 * len(arcs) + 1.0
+        assert js_cost <= py_cost + tol, (alpha, js_cost, py_cost, tol)
+
+
+# ------------------------------------------------------------- the site
+@pytest.fixture(scope="module")
+def served_site():
+    """The static site over HTTP, as GitHub Pages serves it."""
+    import functools
+    import http.server
+    import threading
+
+    if not SITE_INDEX.exists():
+        pytest.skip("site not built")
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler,
+                                directory=str(SITE_INDEX.parent))
+    handler.log_message = lambda *a, **k: None
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}/"
+    srv.shutdown()
+
+
+def test_the_site_loads_its_graph_over_http(served_site):
+    from playwright.sync_api import sync_playwright
+    errors: list = []
+    with sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch(executable_path=_chromium(),
+                                         args=["--no-sandbox", "--disable-gpu"])
+        except Exception as exc:                            # pragma: no cover
+            pytest.skip(f"no usable Chromium: {exc}")
+        page = browser.new_page(viewport={"width": 1280, "height": 800})
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.on("console", lambda m: errors.append(m.text)
+                if m.type == "error" and "fonts.g" not in m.text
+                and "ERR_" not in m.text else None)
+        failed: list = []
+        page.on("requestfailed", lambda r: failed.append(r.url)
+                if served_site in r.url else None)
+        page.goto(served_site, wait_until="load", timeout=240_000)
+        page.wait_for_function(
+            "window.App && App.family && !document.getElementById('result').hidden",
+            timeout=240_000)
+        out = page.evaluate("""() => ({
+            inline: !!window.DATA.bundle, url: window.DATA.bundle_url,
+            hillshade: window.DATA.hillshade && window.DATA.hillshade.url,
+            shade: !!document.querySelector('img.hillshade') && document.querySelector('img.hillshade').naturalWidth,
+            routes: App.family.unique.length, status: document.getElementById('status').textContent,
+        })""")
+        browser.close()
+    assert not errors, errors[:4]
+    assert not failed, failed
+    assert not out["inline"] and out["url"].startswith("data/graph-")
+    assert out["hillshade"].startswith("data/hillshade-") and out["shade"] > 1000
+    assert out["routes"] >= 2
+    import re
+    index = SITE_INDEX.read_text(encoding="utf-8")
+    refs = re.findall(r'(?:href|src)="([^"]+)"', index)
+    local = [r for r in refs if not r.startswith("http")]
+    assert any(re.match(r"app-[0-9a-f]{10}\.js$", r) for r in local), local
+    for name in local + [".nojekyll", out["url"], out["hillshade"]]:
+        assert (SITE_INDEX.parent / name).exists(), name
