@@ -1,0 +1,43 @@
+# Mirrors the Swiss source datasets (swisstopo swissALTI3D, City of Zurich
+# statistical quarters) into the `source-data` release of this repository.
+#
+# `python -m zrh_flat_routes download` fetches from the publishers first and
+# falls back to these release assets only when their hosts are unreachable
+# (some sandboxed build environments block them). The files are the
+# publishers' own, unmodified; provenance.tar.gz records where and when each
+# was fetched, with checksums and the licence pages in force at the time.
+name: Mirror source data
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/optimistic-gates-l0pbj3]
+    paths: ["scripts/mirror_sources.py", ".github/workflows/mirror-data.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - run: python scripts/mirror_sources.py mirror
+      - name: Publish to the source-data release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la mirror
+          files="mirror/provenance.tar.gz mirror/stadtzh_boundaries.tar.gz"
+          for f in mirror/swissalti3d_*.tar; do [ -f "$f" ] && files="$files $f"; done
+          if ! gh release view source-data >/dev/null 2>&1; then
+            gh release create source-data --target "$GITHUB_SHA" --prerelease \
+              --title "Source data mirror" \
+              --notes "Unmodified copies of swisstopo swissALTI3D (2 m) tiles covering Zurich and the City of Zurich statistical quarters, for build environments that cannot reach the publishers. swissALTI3D: Source: Federal Office of Topography swisstopo. Quarters: Stadt Zürich Open Government Data. See provenance.tar.gz for URLs, dates, checksums and licence terms."
+          fi
+          gh release upload source-data $files --clobber

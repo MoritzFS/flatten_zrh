@@ -1,0 +1,210 @@
+"""Mirror the Swiss source datasets into one directory, for a GitHub release.
+
+The analysis needs two datasets whose publishers' hosts are not reachable
+from every build environment: swisstopo's swissALTI3D elevation model
+(data.geo.admin.ch) and the City of Zurich's statistical quarters
+(ogd.stadt-zuerich.ch). This script runs in GitHub Actions, which can reach
+both, and writes the files unmodified next to a manifest recording where each
+one came from, when, and its checksum. The workflow
+``.github/workflows/mirror-data.yml`` then attaches them to the
+``source-data`` release, from which ``python -m zrh_flat_routes download``
+falls back when the publisher's own host is unreachable.
+
+It also saves the publishers' licence pages and catalogue records, so the
+terms the data was taken under are on file next to it.
+
+Usage: python scripts/mirror_sources.py OUT_DIR
+"""
+from __future__ import annotations
+
+import datetime as dt
+import hashlib
+import json
+import sys
+import tarfile
+import time
+import traceback
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+import requests
+
+#: Zurich city with a margin, lon/lat (the city spans 8.448-8.626 E,
+#: 47.320-47.435 N).
+BBOX = (8.425, 47.305, 8.650, 47.450)
+
+STAC = "https://data.geo.admin.ch/api/stac/v0.9"
+ALTI_COLLECTION = "ch.swisstopo.swissalti3d"
+#: Ground sample distance of the swissALTI3D product mirrored (metres).
+ALTI_GSD = "2"
+
+ZH_WFS = "https://www.ogd.stadt-zuerich.ch/wfs/geoportal"
+ZH_LAYERS = ("Statistische_Quartiere", "Stadtkreise")
+
+#: Catalogue records and licence pages kept for provenance.
+PAGES = {
+    "swisstopo_terms_en.html": "https://www.swisstopo.admin.ch/en/terms-of-use-free-geodata-and-geoservices",
+    "swisstopo_source_reference_en.html": "https://www.swisstopo.admin.ch/en/source-reference-ogd-swisstopo",
+    "swisstopo_ogd_conditions.html": "https://www.swisstopo.admin.ch/ogd-conditions",
+    "swisstopo_swissalti3d_en.html": "https://www.swisstopo.admin.ch/en/height-model-swissalti3d",
+    "swisstopo_dhm25_en.html": "https://www.swisstopo.admin.ch/en/height-model-dhm25",
+    "stac_collections.json": f"{STAC}/collections?limit=1000",
+    "stac_swissalti3d.json": f"{STAC}/collections/{ALTI_COLLECTION}",
+    "ckan_swissalti3d.json": "https://ckan.opendata.swiss/api/3/action/package_show?id=swissalti3d",
+    "ckan_dhm25.json": "https://ckan.opendata.swiss/api/3/action/package_show?id=dhm25",
+    "ckan_statistische_quartiere.json": "https://ckan.opendata.swiss/api/3/action/package_show?id=statistische-quartiere2",
+    "ckan_search_quartiere.json": "https://ckan.opendata.swiss/api/3/action/package_search?q=statistische%20quartiere%20z%C3%BCrich&rows=20",
+    "stadtzh_dataset_quartiere.html": "https://data.stadt-zuerich.ch/dataset/geo_statistische_quartiere",
+    "stadtzh_ckan_quartiere.json": "https://data.stadt-zuerich.ch/api/3/action/package_show?id=geo_statistische_quartiere",
+    "stadtzh_ckan_stadtkreise.json": "https://data.stadt-zuerich.ch/api/3/action/package_show?id=geo_stadtkreise",
+    "stadtzh_terms.html": "https://www.stadt-zuerich.ch/de/politik-und-verwaltung/statistik-und-daten/open-government-data/nutzungsbedingungen.html",
+    "opendata_swiss_terms.html": "https://opendata.swiss/en/terms-of-use",
+}
+
+SESSION = requests.Session()
+SESSION.headers["User-Agent"] = "flatten_zrh source mirror (+https://github.com/MoritzFS/flatten_zrh)"
+MANIFEST: list[dict] = []
+
+
+def now() -> str:
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+
+
+def fetch(url: str, dest: Path, retries: int = 4, **kw) -> Path:
+    delay = 2.0
+    for attempt in range(1, retries + 1):
+        try:
+            r = SESSION.get(url, timeout=(30, 300), **kw)
+            r.raise_for_status()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(r.content)
+            MANIFEST.append({
+                "file": str(dest), "url": r.url, "retrieved": now(),
+                "bytes": len(r.content),
+                "sha256": hashlib.sha256(r.content).hexdigest(),
+                "content_type": r.headers.get("Content-Type", ""),
+                "last_modified": r.headers.get("Last-Modified", ""),
+            })
+            return dest
+        except Exception as exc:
+            if attempt == retries:
+                raise
+            print(f"  retry {attempt} for {url}: {exc}", flush=True)
+            time.sleep(delay)
+            delay *= 2
+    raise RuntimeError("unreachable")
+
+
+def guarded(label: str, fn, *args):
+    print(f"== {label}", flush=True)
+    try:
+        return fn(*args)
+    except Exception:
+        traceback.print_exc()
+        MANIFEST.append({"failed": label, "error": traceback.format_exc(limit=2)})
+        return None
+
+
+# --------------------------------------------------------------------------
+def stac_items(collection: str, bbox) -> list[dict]:
+    url = f"{STAC}/collections/{collection}/items"
+    params = {"bbox": ",".join(map(str, bbox)), "limit": 100}
+    items = []
+    while url:
+        r = SESSION.get(url, params=params, timeout=120)
+        r.raise_for_status()
+        page = r.json()
+        items += page.get("features", [])
+        url = next((l["href"] for l in page.get("links", []) if l.get("rel") == "next"), None)
+        params = None
+    return items
+
+
+def mirror_swissalti3d(out: Path) -> None:
+    items = stac_items(ALTI_COLLECTION, BBOX)
+    print(f"  {len(items)} STAC items", flush=True)
+    (out / "provenance").mkdir(parents=True, exist_ok=True)
+    (out / "provenance" / "stac_swissalti3d_items.json").write_text(json.dumps(items, indent=1))
+    # One asset per 1 km tile: the 2 m GeoTIFF of the most recent edition.
+    best: dict[str, tuple[str, str, dict]] = {}
+    for it in items:
+        for key, a in it.get("assets", {}).items():
+            if not key.endswith(".tif") or f"_{ALTI_GSD}_2056_" not in key:
+                continue
+            # swissalti3d_<year>_<E>-<N>_<gsd>_2056_5728.tif
+            parts = key.split("_")
+            year, tile = parts[1], parts[2]
+            if tile not in best or year > best[tile][0]:
+                best[tile] = (year, key, a)
+    print(f"  {len(best)} tiles at {ALTI_GSD} m", flush=True)
+    tdir = out / "swissalti3d"
+
+    def get(entry):
+        year, key, a = entry
+        dest = tdir / key
+        fetch(a["href"], dest)
+        return key
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        done = list(pool.map(get, best.values()))
+    print(f"  downloaded {len(done)} tiles", flush=True)
+    tar = out / f"swissalti3d_{ALTI_GSD}m_zurich.tar"
+    with tarfile.open(tar, "w") as tf:
+        for p in sorted(tdir.glob("*.tif")):
+            tf.add(p, arcname=p.name)
+    print(f"  wrote {tar.name} ({tar.stat().st_size / 1e6:.1f} MB)", flush=True)
+
+
+def mirror_quarters(out: Path) -> None:
+    for layer in ZH_LAYERS:
+        base = f"{ZH_WFS}/{layer}"
+        cap = out / "stadtzh" / f"{layer}_capabilities.xml"
+        fetch(base, cap, params={"service": "WFS", "request": "GetCapabilities",
+                                 "version": "1.1.0"})
+        import re
+        names = re.findall(r"<(?:wfs:)?Name>([^<]+)</(?:wfs:)?Name>", cap.read_text("utf-8", "replace"))
+        print(f"  {layer}: feature types {names}", flush=True)
+        for name in names:
+            short = name.split(":")[-1]
+            for srs, tag in (("EPSG:4326", "wgs84"), ("EPSG:2056", "lv95")):
+                dest = out / "stadtzh" / f"{short}_{tag}.geojson"
+                try:
+                    fetch(base, dest, params={
+                        "service": "WFS", "version": "1.1.0", "request": "GetFeature",
+                        "typename": name, "outputFormat": "GeoJSON", "srsName": srs})
+                    head = dest.read_bytes()[:200]
+                    print(f"    {dest.name}: {dest.stat().st_size} bytes, {head[:80]!r}", flush=True)
+                except Exception as exc:
+                    print(f"    {name} {srs}: {exc}", flush=True)
+
+
+def mirror_pages(out: Path) -> None:
+    for fname, url in PAGES.items():
+        try:
+            fetch(url, out / "provenance" / fname, retries=2)
+            print(f"  ok {fname}", flush=True)
+        except Exception as exc:
+            print(f"  FAILED {fname}: {exc}", flush=True)
+            MANIFEST.append({"failed": fname, "url": url, "error": str(exc)})
+
+
+def main() -> int:
+    out = Path(sys.argv[1] if len(sys.argv) > 1 else "mirror")
+    out.mkdir(parents=True, exist_ok=True)
+    guarded("licence pages and catalogue records", mirror_pages, out)
+    guarded("Stadt Zurich statistical quarters", mirror_quarters, out)
+    guarded("swissALTI3D", mirror_swissalti3d, out)
+    (out / "provenance").mkdir(exist_ok=True)
+    (out / "provenance" / "manifest.json").write_text(json.dumps(MANIFEST, indent=1))
+    with tarfile.open(out / "stadtzh_boundaries.tar.gz", "w:gz") as tf:
+        if (out / "stadtzh").exists():
+            tf.add(out / "stadtzh", arcname="stadtzh")
+    with tarfile.open(out / "provenance.tar.gz", "w:gz") as tf:
+        tf.add(out / "provenance", arcname="provenance")
+    failed = [m for m in MANIFEST if "failed" in m]
+    print(f"done; {len(failed)} failure(s)", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
