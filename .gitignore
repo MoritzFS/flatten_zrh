@@ -1,0 +1,17 @@
+# Cached source and intermediate data: large, and fully reproducible with
+#   python -m zrh_flat_routes download
+#   python -m zrh_flat_routes build-network
+data/raw/
+data/processed/
+
+# Regenerable and bulky; rebuild with `python -m zrh_flat_routes analyze`
+outputs/lowland_basins.geojson
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+.venv/
+
+data/sensitivity/

@@ -4,8 +4,9 @@
 # `python -m zrh_flat_routes download` fetches from the publishers first and
 # falls back to these release assets only when their hosts are unreachable
 # (some sandboxed build environments block them). The files are the
-# publishers' own, unmodified; provenance.tar.gz records where and when each
-# was fetched, with checksums and the licence pages in force at the time.
+# publishers' own, unmodified, except DHM25, which is cut from the national
+# grid to a window around Zurich; provenance.tar.gz records where and when
+# each was fetched, with checksums and the licence pages in force at the time.
 name: Mirror source data
 
 on:
@@ -26,15 +27,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install requests
-      - run: python scripts/mirror_sources.py mirror
+      - run: pip install requests numpy rasterio
+      - name: Fetch from the publishers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The 358 MB of elevation tiles are fetched once; later runs refresh
+          # the rest and keep the release's existing tiles.
+          args=""
+          if gh release view source-data --json assets -q '.assets[].name' 2>/dev/null | grep -q '^swissalti3d_'; then
+            args="--skip-alti"
+          fi
+          python scripts/mirror_sources.py mirror $args
       - name: Publish to the source-data release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -la mirror
           files="mirror/provenance.tar.gz mirror/stadtzh_boundaries.tar.gz"
-          for f in mirror/swissalti3d_*.tar; do [ -f "$f" ] && files="$files $f"; done
+          for f in mirror/swissalti3d_*.tar mirror/dhm25_*.tif; do [ -f "$f" ] && files="$files $f"; done
           if ! gh release view source-data >/dev/null 2>&1; then
             gh release create source-data --target "$GITHUB_SHA" --prerelease \
               --title "Source data mirror" \

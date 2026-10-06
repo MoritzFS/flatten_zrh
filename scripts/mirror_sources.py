@@ -13,7 +13,7 @@ falls back when the publisher's own host is unreachable.
 It also saves the publishers' licence pages and catalogue records, so the
 terms the data was taken under are on file next to it.
 
-Usage: python scripts/mirror_sources.py OUT_DIR
+Usage: python scripts/mirror_sources.py OUT_DIR [--skip-alti]
 """
 from __future__ import annotations
 
@@ -38,6 +38,13 @@ ALTI_COLLECTION = "ch.swisstopo.swissalti3d"
 #: Ground sample distance of the swissALTI3D product mirrored (metres).
 ALTI_GSD = "2"
 
+#: DHM25 matrix model (25 m, interpolated from the National Map's contours,
+#: so independent of the lidar behind swissALTI3D); used only as a
+#: cross-check. Distributed as one national ASCII grid in LV03.
+DHM25_URL = "https://cms.geo.admin.ch/ogd/topography/DHM25_MM_ASCII_GRID.zip"
+#: LV03 window around Zurich (EPSG:21781 metres: xmin, ymin, xmax, ymax).
+DHM25_WINDOW = (673000, 238000, 692000, 257000)
+
 ZH_WFS = "https://www.ogd.stadt-zuerich.ch/wfs/geoportal"
 ZH_LAYERS = ("Statistische_Quartiere", "Stadtkreise")
 
@@ -57,7 +64,6 @@ PAGES = {
     "stadtzh_dataset_quartiere.html": "https://data.stadt-zuerich.ch/dataset/geo_statistische_quartiere",
     "stadtzh_ckan_quartiere.json": "https://data.stadt-zuerich.ch/api/3/action/package_show?id=geo_statistische_quartiere",
     "stadtzh_ckan_stadtkreise.json": "https://data.stadt-zuerich.ch/api/3/action/package_show?id=geo_stadtkreise",
-    "stadtzh_terms.html": "https://www.stadt-zuerich.ch/de/politik-und-verwaltung/statistik-und-daten/open-government-data/nutzungsbedingungen.html",
     "opendata_swiss_terms.html": "https://opendata.swiss/en/terms-of-use",
 }
 
@@ -178,6 +184,44 @@ def mirror_quarters(out: Path) -> None:
                     print(f"    {name} {srs}: {exc}", flush=True)
 
 
+def mirror_dhm25(out: Path) -> None:
+    """Clip the national DHM25 grid to Zurich and keep it as a GeoTIFF."""
+    import zipfile
+
+    import numpy as np
+    import rasterio
+    from rasterio.windows import from_bounds
+
+    z = out / "dhm25" / "DHM25_MM_ASCII_GRID.zip"
+    fetch(DHM25_URL, z)
+    with zipfile.ZipFile(z) as zf:
+        names = zf.namelist()
+        print(f"  zip members: {names}", flush=True)
+        grid = next(n for n in names if n.lower().endswith((".asc", ".agr", ".txt"))
+                    and "readme" not in n.lower())
+        zf.extract(grid, out / "dhm25")
+        for n in names:
+            if n.lower().endswith(".prj") or "readme" in n.lower() or n.lower().endswith(".pdf"):
+                zf.extract(n, out / "dhm25")
+    src_path = out / "dhm25" / grid
+    with rasterio.open(src_path) as src:
+        print(f"  {grid}: {src.width}x{src.height} res={src.res} bounds={src.bounds} crs={src.crs}",
+              flush=True)
+        win = from_bounds(*DHM25_WINDOW, transform=src.transform).round_offsets().round_lengths()
+        arr = src.read(1, window=win)
+        transform = src.window_transform(win)
+        nodata = src.nodata
+    dest = out / "dhm25_zurich_lv03.tif"
+    with rasterio.open(dest, "w", driver="GTiff", width=arr.shape[1], height=arr.shape[0],
+                       count=1, dtype="float32", crs="EPSG:21781", transform=transform,
+                       nodata=nodata, compress="deflate") as dst:
+        dst.write(arr.astype("float32"), 1)
+    print(f"  wrote {dest.name} {arr.shape} range {np.nanmin(arr):.1f}-{np.nanmax(arr):.1f}",
+          flush=True)
+    src_path.unlink()
+    z.unlink()
+
+
 def mirror_pages(out: Path) -> None:
     for fname, url in PAGES.items():
         try:
@@ -193,7 +237,9 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     guarded("licence pages and catalogue records", mirror_pages, out)
     guarded("Stadt Zurich statistical quarters", mirror_quarters, out)
-    guarded("swissALTI3D", mirror_swissalti3d, out)
+    if "--skip-alti" not in sys.argv:
+        guarded("swissALTI3D", mirror_swissalti3d, out)
+    guarded("DHM25", mirror_dhm25, out)
     (out / "provenance").mkdir(exist_ok=True)
     (out / "provenance" / "manifest.json").write_text(json.dumps(MANIFEST, indent=1))
     with tarfile.open(out / "stadtzh_boundaries.tar.gz", "w:gz") as tf:
