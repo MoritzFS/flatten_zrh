@@ -222,6 +222,35 @@ def mirror_dhm25(out: Path) -> None:
     z.unlink()
 
 
+#: Every OpenStreetMap way in the study area that carries an ``incline`` tag.
+#: Mappers mostly copy these from gradient warning signs, which makes them
+#: the closest thing to published street gradients for Zurich; validation
+#: compares them with the computed grades. (c) OpenStreetMap contributors,
+#: ODbL 1.0.
+OVERPASS = ("https://overpass-api.de/api/interpreter",
+            "https://overpass.kumi.systems/api/interpreter")
+INCLINE_QUERY = (
+    "[out:json][timeout:180];"
+    f"way[\"highway\"][\"incline\"]({BBOX[1]},{BBOX[0]},{BBOX[3]},{BBOX[2]});"
+    "out tags geom;"
+)
+
+
+def mirror_osm_incline(out: Path) -> None:
+    last = None
+    for url in OVERPASS:
+        try:
+            fetch(url, out / "osm_incline_zurich.json", retries=2,
+                  params={"data": INCLINE_QUERY})
+            n = len(json.loads((out / "osm_incline_zurich.json").read_text())["elements"])
+            print(f"  {n} ways with an incline tag (from {url})", flush=True)
+            return
+        except Exception as exc:
+            last = exc
+            print(f"  {url}: {exc}", flush=True)
+    raise RuntimeError(f"no Overpass endpoint answered: {last}")
+
+
 def mirror_pages(out: Path) -> None:
     for fname, url in PAGES.items():
         try:
@@ -240,6 +269,7 @@ def main() -> int:
     if "--skip-alti" not in sys.argv:
         guarded("swissALTI3D", mirror_swissalti3d, out)
     guarded("DHM25", mirror_dhm25, out)
+    guarded("OpenStreetMap incline tags", mirror_osm_incline, out)
     (out / "provenance").mkdir(exist_ok=True)
     (out / "provenance" / "manifest.json").write_text(json.dumps(MANIFEST, indent=1))
     with tarfile.open(out / "stadtzh_boundaries.tar.gz", "w:gz") as tf:
